@@ -14,6 +14,7 @@
 #include "Host_Parameter_Set.h"
 #include "SSD_Device.h"
 #include "../utils/Workload_Statistics.h"
+#include "../cxl/CXL_PCIe.h"
 
 class Host_System : public MQSimEngine::Sim_Object, public MQSimEngine::Sim_Reporter
 {
@@ -32,6 +33,7 @@ private:
 	Host_Components::PCIe_Link* Link;
 	Host_Components::PCIe_Switch* PCIe_switch;
 	Host_Components::SATA_HBA* SATA_hba;
+	Host_Components::CXL_PCIe* cxl_pcie;
 	std::vector<Host_Components::IO_Flow_Base*> IO_flows;
 	SSD_Device* ssd_device;
 	std::vector<Utils::Workload_Statistics*> get_workloads_statistics();

@@ -58,6 +58,9 @@ namespace SSD_Components
 		bool Use_dynamic_wearleveling();
 		bool Use_static_wearleveling();
 		bool Stop_servicing_writes(const NVM::FlashMemory::Physical_Page_Address& plane_address);
+		bool Consume_token(int token_count);
+		void Adjust_token(int token_count);
+		
 	protected:
 		GC_Block_Selection_Policy_Type block_selection_policy;
 		static GC_and_WL_Unit_Base * _my_instance;
@@ -96,6 +99,25 @@ namespace SSD_Components
 		unsigned int block_no_per_plane;
 		unsigned int pages_no_per_block;
 		unsigned int sector_no_per_page;
+
+		std::list<NVM_Transaction*> waiting_writeback_transaction;
+		Block_Pool_Slot_Type** victim_blocks;
+		NVM::FlashMemory::Physical_Page_Address* gc_victim_address;
+
+		int gc_pending_read_count; //mapping granularity count 
+		int gc_pending_write_count; //mapping granularity count 
+		int gc_pending_erase_count;
+		unsigned int cur_page_offset;
+		unsigned int cur_subpage_offset;
+		bool new_victim_required;
+		int gc_unit_count;
+
+		int intial_token;
+		double token;
+		double token_per_write; //capable write for GC write. it depends on GC victim block's invalid space
+
+		int cur_state_index;
+		int state_repeat_count;
 	};
 }
 

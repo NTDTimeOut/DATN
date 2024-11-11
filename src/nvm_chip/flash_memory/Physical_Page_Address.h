@@ -20,6 +20,10 @@ namespace NVM
 			flash_block_ID_type BlockID;
 			flash_page_ID_type PageID;
 
+			flash_page_ID_type subPageID;
+			bool isPrimaryPage;
+
+
 			Physical_Page_Address(const flash_channel_ID_type channel_id = 0, const flash_chip_ID_type chip_id = 0, const flash_die_ID_type die_id = 0,
 				const flash_plane_ID_type plane_id = 0, const flash_block_ID_type block_id = 0, const flash_page_ID_type page_id = 0)
 			{
@@ -29,6 +33,9 @@ namespace NVM
 				PlaneID = plane_id;
 				BlockID = block_id;
 				PageID = page_id;
+
+				subPageID = 0;
+
 			}
 
 			Physical_Page_Address(const Physical_Page_Address& addressToCopy)
@@ -39,6 +46,9 @@ namespace NVM
 				PlaneID = addressToCopy.PlaneID;
 				BlockID = addressToCopy.BlockID;
 				PageID = addressToCopy.PageID;
+
+				subPageID = addressToCopy.subPageID;
+
 			}
 
 			static void SetBlockAddressConstraint(const bool BAConstraint)

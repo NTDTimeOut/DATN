@@ -34,6 +34,8 @@ namespace SSD_Components
 		Data_Cache_Manager_Base* cache)
 		: MQSimEngine::Sim_Object(id), type(type), max_logical_sector_address(max_logical_sector_address), 
 		sectors_per_page(sectors_per_page), cache(cache)
+		,sectors_per_subpage(sectors_per_page/ALIGN_UNIT_SIZE)
+
 	{
 		_my_instance = this;
 	}
@@ -54,6 +56,29 @@ namespace SSD_Components
 	void Host_Interface_Base::Validate_simulation_config()
 	{
 	}
+	void Host_Interface_Base::Notify_DRAM_is_full() {
+		pcie_switch->Notify_dram_full();
+	}
+	void Host_Interface_Base::Notify_host_DRAM_is_free() {
+		pcie_switch->Notify_dram_avail();
+	}
+	void Host_Interface_Base::Notify_CXL_Host_request_complete() {
+		pcie_switch->Notify_request_complete();
+	}
+
+	void Host_Interface_Base::Notify_CXL_Host_mshr_full() {
+		pcie_switch->Notify_mshr_full();
+	}
+	void Host_Interface_Base::Notify_CXL_Host_mshr_not_full() {
+		pcie_switch->Notify_mshr_not_full();
+	}
+
+	void Host_Interface_Base::Notify_CXL_Host_flash_full() {
+		pcie_switch->Notify_flash_full();
+	}
+	void Host_Interface_Base::Notify_CXL_Host_flash_not_full() {
+		pcie_switch->Notify_flash_not_full();
+	}
 
 	void Host_Interface_Base::Send_read_message_to_host(uint64_t addresss, unsigned int request_read_data_size)
 	{
@@ -64,6 +89,7 @@ namespace SSD_Components
 		pcie_message->Payload = (void*)(intptr_t)request_read_data_size;
 		pcie_message->Payload_size = sizeof(request_read_data_size);
 		pcie_switch->Send_to_host(pcie_message);
+		delete pcie_message;
 	}
 
 	void Host_Interface_Base::Send_write_message_to_host(uint64_t addresss, void* message, unsigned int message_size)
@@ -75,6 +101,7 @@ namespace SSD_Components
 		COPYDATA(pcie_message->Payload, message, pcie_message->Payload_size);
 		pcie_message->Payload_size = message_size;
 		pcie_switch->Send_to_host(pcie_message);
+		delete pcie_message;
 	}
 
 	void Host_Interface_Base::Attach_to_device(Host_Components::PCIe_Switch* pcie_switch)

@@ -8,6 +8,7 @@
 #include "../host/PCIe_Message.h"
 #include "User_Request.h"
 #include "Data_Cache_Manager_Base.h"
+#include "../cxl/DRAM_Model.h"
 #include <stdint.h>
 #include <cstring>
 
@@ -27,6 +28,7 @@ namespace SSD_Components
 	delete REQ;
 
 	class Data_Cache_Manager_Base;
+	class CXL_DRAM_Model;
 	class Host_Interface_Base;
 
 	class Input_Stream_Base
@@ -46,7 +48,9 @@ namespace SSD_Components
 	{
 		friend class Request_Fetch_Unit_Base;
 		friend class Request_Fetch_Unit_NVMe;
+		friend class Request_Fetch_Unit_CXL;
 		friend class Request_Fetch_Unit_SATA;
+		friend class CXL_Manager;
 	public:
 		Input_Stream_Manager_Base(Host_Interface_Base* host_interface);
 		virtual ~Input_Stream_Manager_Base();
@@ -93,10 +97,13 @@ namespace SSD_Components
 	{
 		friend class Input_Stream_Manager_Base;
 		friend class Input_Stream_Manager_NVMe;
+		friend class Input_Stream_Manager_CXL;
 		friend class Input_Stream_Manager_SATA;
 		friend class Request_Fetch_Unit_Base;
 		friend class Request_Fetch_Unit_NVMe;
+		friend class Request_Fetch_Unit_CXL;
 		friend class Request_Fetch_Unit_SATA;
+		friend class CXL_Manager;
 	public:
 		Host_Interface_Base(const sim_object_id_type& id, HostInterface_Types type, LHA_type max_logical_sector_address, 
 			unsigned int sectors_per_page, Data_Cache_Manager_Base* cache);
@@ -110,8 +117,8 @@ namespace SSD_Components
 			connected_user_request_arrived_signal_handlers.push_back(function);
 		}
 
-		void Consume_pcie_message(Host_Components::PCIe_Message* message)
-		{
+		virtual void Consume_pcie_message(Host_Components::PCIe_Message* message)
+		{ //virtual is added so Host_interface_cxl can override this method
 			if (message->Type == Host_Components::PCIe_Message_Type::READ_COMP) {
 				request_fetch_unit->Process_pcie_read_message(message->Address, message->Payload, message->Payload_size);
 			} else {
@@ -119,6 +126,23 @@ namespace SSD_Components
 			}
 			delete message;
 		}
+
+		virtual void Update_CXL_DRAM_state(bool rw, uint64_t lba, bool& falsehit){
+		}
+		virtual void Update_CXL_DRAM_state_when_miss_data_ready(bool rw, uint64_t lba, bool serviced_before, bool& completed_removed_from_mshr) {
+		}
+		virtual void Handle_CXL_false_hit(bool rw, uint64_t lba){}
+		virtual void Notify_DRAM_is_free() {}
+		virtual uint64_t Get_flush_count() { return 0; }
+		virtual void print_prefetch_info(){}
+		
+		void Notify_DRAM_is_full();
+		void Notify_host_DRAM_is_free();
+		void Notify_CXL_Host_request_complete();
+		void Notify_CXL_Host_mshr_full();
+		void Notify_CXL_Host_mshr_not_full();
+		void Notify_CXL_Host_flash_full();
+		void Notify_CXL_Host_flash_not_full();
 	
 		void Send_read_message_to_host(uint64_t addresss, unsigned int request_read_data_size);
 		void Send_write_message_to_host(uint64_t addresss, void* message, unsigned int message_size);
@@ -131,10 +155,12 @@ namespace SSD_Components
 		HostInterface_Types type;
 		LHA_type max_logical_sector_address;
 		unsigned int sectors_per_page;
+		unsigned int sectors_per_subpage; 
 		static Host_Interface_Base* _my_instance;
 		Input_Stream_Manager_Base* input_stream_manager;
 		Request_Fetch_Unit_Base* request_fetch_unit;
 		Data_Cache_Manager_Base* cache;
+		CXL_DRAM_Model* cxl_dram;
 		std::vector<UserRequestArrivedSignalHandlerType> connected_user_request_arrived_signal_handlers;
 
 		void broadcast_user_request_arrival_signal(User_Request* user_request)

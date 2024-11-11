@@ -28,6 +28,9 @@
     <Filter Include="utils\rapidxml">
       <UniqueIdentifier>{338b4a59-3227-4ff1-be87-2a60c6309aa6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="cxl">
+      <UniqueIdentifier>{5ceb6c73-336c-4487-a3b2-2de83c9dfc9d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
@@ -202,14 +205,41 @@
     <ClCompile Include="src\ssd\TSU_OutofOrder.cpp">
       <Filter>ssd</Filter>
     </ClCompile>
-    <ClCompile Include="src\ssd\TSU_Priority_OutofOrder.cpp">
-      <Filter>ssd</Filter>
-    </ClCompile>
     <ClCompile Include="src\ssd\User_Request.cpp">
       <Filter>ssd</Filter>
     </ClCompile>
     <ClCompile Include="src\host\SATA_HBA.cpp">
       <Filter>host</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\Host_Interface_CXL.cpp">
+      <Filter>cxl</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\CXL_PCIe.cpp">
+      <Filter>cxl</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\CXL_Config.cpp">
+      <Filter>cxl</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\DRAM_Subsystem.cpp">
+      <Filter>cxl</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\CXL_MSHR.cpp">
+      <Filter>cxl</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\DRAM_Model.cpp">
+      <Filter>cxl</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\OutputLog.cpp">
+      <Filter>cxl</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\lrfu_heap.cpp">
+      <Filter>cxl</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\Prefetching_Alg.cpp">
+      <Filter>cxl</Filter>
+    </ClCompile>
+    <ClCompile Include="src\cxl\CFLRU.cpp">
+      <Filter>cxl</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -462,17 +492,44 @@
     <ClInclude Include="src\ssd\TSU_OutofOrder.h">
       <Filter>ssd</Filter>
     </ClInclude>
-    <ClInclude Include="src\ssd\TSU_Priority_OutofOrder.h">
-      <Filter>ssd</Filter>
-    </ClInclude>
     <ClInclude Include="src\ssd\User_Request.h">
       <Filter>ssd</Filter>
     </ClInclude>
     <ClInclude Include="src\host\SATA_HBA.h">
       <Filter>host</Filter>
     </ClInclude>
-    <ClInclude Include="src\ssd\Host_Interface_NVMe_Priorities.h">
-      <Filter>ssd</Filter>
+    <ClInclude Include="src\nvm_chip\flash_memory\SubPage.h">
+      <Filter>nvm_chip\flash_memory</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\Host_Interface_CXL.h">
+      <Filter>cxl</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\CXL_PCIe.h">
+      <Filter>cxl</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\CXL_Config.h">
+      <Filter>cxl</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\DRAM_Subsystem.h">
+      <Filter>cxl</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\CXL_MSHR.h">
+      <Filter>cxl</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\DRAM_Model.h">
+      <Filter>cxl</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\OutputLog.h">
+      <Filter>cxl</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\lrfu_heap.h">
+      <Filter>cxl</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\Prefetching_Alg.h">
+      <Filter>cxl</Filter>
+    </ClInclude>
+    <ClInclude Include="src\cxl\CFLRU.h">
+      <Filter>cxl</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
