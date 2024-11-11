@@ -1,10 +1,46 @@
 #include <cmath>
 #include <assert.h>
 #include <stdexcept>
+#include <algorithm>
+//#include <windows.h>
 
 #include "Address_Mapping_Unit_Page_Level.h"
 #include "Stats.h"
 #include "../utils/Logical_Address_Partitioning_Unit.h"
+
+#define EXECUTION_CONTROL 
+
+extern bool GC_on_for_debug;
+extern unsigned long long int Total_RMW_SEC;
+int subpgs_host_w_debug = 0;
+
+class CustomIterator : public list<SSD_Components::NVM_Transaction*>::iterator {
+public:
+	using list<SSD_Components::NVM_Transaction*>::iterator::iterator;
+
+	CustomIterator(list<SSD_Components::NVM_Transaction*>::iterator it)
+		: list<SSD_Components::NVM_Transaction*>::iterator(it) {}
+
+    CustomIterator operator+(int value) const {
+        CustomIterator newIterator(*this);
+        for (int i = 0; i < value; ++i) {
+            ++newIterator;
+        }
+        return newIterator;
+    }
+
+	CustomIterator operator+=(const long int value) const {
+        CustomIterator newIterator(*this);
+        for (int i = 0; i < value; ++i) {
+            ++newIterator;
+        }
+        return newIterator;
+    }
+
+	int operator-(const CustomIterator& other) const {
+		return distance(*this, other);
+	}
+};
 
 namespace SSD_Components
 {
@@ -175,7 +211,11 @@ namespace SSD_Components
 	{
 		Total_physical_pages_no = total_physical_sectors_no / sectors_no_per_page;
 		max_logical_sector_address = total_logical_sectors_no;
-		Total_logical_pages_no = (max_logical_sector_address / sectors_no_per_page) + (max_logical_sector_address % sectors_no_per_page == 0? 0 : 1);
+#if PATCH_PRECOND
+		Total_logical_pages_no = (max_logical_sector_address / (sectors_no_per_page / ALIGN_UNIT_SIZE)) + (max_logical_sector_address % sectors_no_per_page == 0 ? 0 : 1);
+#else
+		Total_logical_pages_no = (max_logical_sector_address / sectors_no_per_page) + (max_logical_sector_address % sectors_no_per_page == 0 ? 0 : 1);
+#endif
 		
 		Channel_ids = new flash_channel_ID_type[channel_no];
 		for (flash_channel_ID_type cid = 0; cid < channel_no; cid++) {
@@ -197,12 +237,14 @@ namespace SSD_Components
 			Plane_ids[pid] = plane_ids[pid];
 		}
 
-		GlobalMappingTable = new GMTEntryType[Total_logical_pages_no];
-		for (unsigned int i = 0; i < Total_logical_pages_no; i++) {
+		std::cout << "[flag1]Total_logical_pages_no *ALIGN_UNIT_SIZE: " << Total_logical_pages_no*ALIGN_UNIT_SIZE << std::endl;
+		GlobalMappingTable = new GMTEntryType[Total_logical_pages_no*ALIGN_UNIT_SIZE];
+		for (unsigned int i = 0; i < Total_logical_pages_no* ALIGN_UNIT_SIZE; i++) {
 			GlobalMappingTable[i].PPA = NO_PPA;
 			GlobalMappingTable[i].WrittenStateBitmap = UNWRITTEN_LOGICAL_PAGE;
 			GlobalMappingTable[i].TimeStamp = 0;
-		}
+	}
+
 
 		//If CMT is NULL, then each address mapping domain should create its own CMT
 		if (CMT == NULL) {
@@ -213,12 +255,14 @@ namespace SSD_Components
 			this->CMT = CMT;
 		}
 
-		Total_translation_pages_no = MVPN_type(Total_logical_pages_no / Translation_entries_per_page);
+
+		Total_translation_pages_no = MVPN_type(Total_logical_pages_no * ALIGN_UNIT_SIZE / Translation_entries_per_page);
 		GlobalTranslationDirectory = new GTDEntryType[Total_translation_pages_no + 1];
 		for (MVPN_type i = 0; i <= Total_translation_pages_no; i++) {
 			GlobalTranslationDirectory[i].MPPN = (MPPN_type)NO_MPPN;
 			GlobalTranslationDirectory[i].TimeStamp = INVALID_TIME_STAMP;
 		}
+
 	}
 
 	AddressMappingDomain::~AddressMappingDomain()
@@ -267,6 +311,7 @@ namespace SSD_Components
 
 	inline PPA_type AddressMappingDomain::Get_ppa(const bool ideal_mapping, const stream_id_type stream_id, const LPA_type lpa)
 	{
+		//std::cout << "[flag2] lpa: " << lpa<<std::endl;
 		if (ideal_mapping) {
 			return GlobalMappingTable[lpa].PPA;
 		} else {
@@ -319,6 +364,15 @@ namespace SSD_Components
 		flash_channel_ID_type* chip_ids = NULL;
 		flash_channel_ID_type* die_ids = NULL;
 		flash_channel_ID_type* plane_ids = NULL;
+
+		user_Alloc_count = new unsigned int[no_of_input_streams];
+		gc_Alloc_count = new unsigned int[no_of_input_streams];
+		//
+		flush_unit_count = channel_count * chip_no_per_channel * die_no_per_chip * plane_no_per_die *BUFFERING_SCALE_4K;
+
+			
+		
+		std::cout << "flush_cnt: " << flush_unit_count << std::endl;
 		for (unsigned int domainID = 0; domainID < no_of_input_streams; domainID++) {
 			/* Since we want to have the same mapping table entry size for all streams, the entry size
 			*  is calculated at this level and then pass it to the constructors of mapping domains
@@ -328,6 +382,9 @@ namespace SSD_Components
 			//In GTD we do not need to store lpa
 			GTD_entry_size = (unsigned int)std::ceil((std::log2(total_physical_pages_no) + sector_no_per_page) / 8);
 			no_of_translation_entries_per_page = (SectorsPerPage * SECTOR_SIZE_IN_BYTE) / GTD_entry_size;
+			
+			user_Alloc_count[domainID] = 0;
+			gc_Alloc_count[domainID] = 0;
 
 			Cached_Mapping_Table* sharedCMT = NULL;
 			unsigned int per_stream_cmt_capacity = 0;
@@ -429,6 +486,7 @@ namespace SSD_Components
 		NVM_Transaction_Flash_WR* dummy_tr = new NVM_Transaction_Flash_WR(Transaction_Source_Type::MAPPING, 0, 0,
 			NO_LPA, 0, NULL, 0, NULL, 0, 0);
 
+		
 		for (unsigned int stream_id = 0; stream_id < no_of_input_streams; stream_id++) {
 			dummy_tr->Stream_id = stream_id;
 			for (MVPN_type translation_page_id = 0; translation_page_id < domains[stream_id]->Total_translation_pages_no; translation_page_id++) {
@@ -438,7 +496,9 @@ namespace SSD_Components
 				flash_controller->Change_flash_page_status_for_preconditioning(dummy_tr->Address, dummy_tr->LPA);
 			}
 		}
+		
 		mapping_table_stored_on_flash = true;
+		
 	}
 
 	int Address_Mapping_Unit_Page_Level::Bring_to_CMT_for_preconditioning(stream_id_type stream_id, LPA_type lpa)
@@ -476,35 +536,169 @@ namespace SSD_Components
 	{
 		return domains[stream_id]->No_of_inserted_entries_in_preconditioning;
 	}
+					
 
-	void Address_Mapping_Unit_Page_Level::Translate_lpa_to_ppa_and_dispatch(const std::list<NVM_Transaction*>& transactionList)
+	bool cmp(const NVM_Transaction* p1, const NVM_Transaction* p2) {
+		if (((NVM_Transaction_Flash*)(p1))->PPA < ((NVM_Transaction_Flash*)(p2))->PPA) return true;
+		else return false;
+	}
+
+
+	int Address_Mapping_Unit_Page_Level::Translate_lpa_to_ppa_and_dispatch( std::list<NVM_Transaction*>& transactionList, User_Request* user_request, unsigned int* back_pressure_buffer_depth)
 	{
-		for (std::list<NVM_Transaction*>::const_iterator it = transactionList.begin();
-			it != transactionList.end(); ) {
-			if (is_lpa_locked_for_gc((*it)->Stream_id, ((NVM_Transaction_Flash*)(*it))->LPA)) {
+		int count = 0;
+		bool try_query = true;
+		int subpgs_hanged_r = 0;
+		int subpgs_hanged_w = 0;
+
+		// checking the possiblity of write request using token value.
+		std::list<NVM_Transaction*>::const_iterator it = transactionList.begin();
+		bool is_write = (((NVM_Transaction_Flash*)(*it))->Type == Transaction_Type::WRITE) ? true : false;
+
+		//if (((NVM_Transaction_Flash*)(*it))->Type == Transaction_Type::WRITE) std::cout << transactionList.size() << std::endl;;
+
+		if ((is_write == true) && (transactionList.size() >= (flush_unit_count))) {
+
+#ifdef EXECUTION_CONTROL
+			if (ftl->GC_and_WL_Unit->Consume_token(flush_unit_count) != true)
+			{
+				try_query = false;
+			}
+#else 
+			if (ftl->GC_and_WL_Unit->Stop_servicing_writes(((NVM_Transaction_Flash*)(*it))->Address)) {
+				try_query = false;
+			}
+#endif			
+		}
+
+
+		//query until flush_unit_count 
+		for (std::list<NVM_Transaction*>::const_iterator it = transactionList.begin(); it != transactionList.end(); ) {
+
+			if (try_query != true) {
 				//iterator should be post-incremented since the iterator may be deleted from list
-				manage_user_transaction_facing_barrier((NVM_Transaction_Flash*)*(it++));
-			} else {
+				manage_unsuccessful_write((NVM_Transaction_Flash*)*(it++));
+			}
+			else {
+				if (((NVM_Transaction_Flash*)(*it))->Type == Transaction_Type::READ && transactionList.size() > 4) {
+					//std::cout << "[read_ppa debug]" << std::endl;
+				}
 				query_cmt((NVM_Transaction_Flash*)(*it++));
+			}
+
+			if (is_write == true) {
+				count++;
+				if (count == flush_unit_count) {
+					break;
+				}
 			}
 		}
 
+
+		if (try_query) {
+			if (GC_on_for_debug) {
+				subpgs_host_w_debug += transactionList.size();
+				//std::cout << "host subpgs W: " << subpgs_host_w_debug << ", ";
+			}
+			CustomIterator first (transactionList.begin());
+			CustomIterator second (transactionList.end());
+			stable_sort(first, second, cmp);
+			transactionList = list<NVM_Transaction*>(first, second);
+
+			///*
+			int align_unit = ALIGN_UNIT_SIZE;
+			bool stop_iterate = false;
+			PPA_type bound_btm_PPA = 0;
+			PPA_type bound_top_PPA = 0;
+
+			if (transactionList.size() > 1) { // && transactionList.front()->Type == Transaction_Type::WRITE) {
+				if (transactionList.front()->Type == Transaction_Type::READ) {
+					//std::cout << "[0. host read trs sort debug] tr_list size: " << transactionList.size() << std::endl;
+				}
+				int end_PPA_of_arr = ((NVM_Transaction_Flash*)(transactionList.back()))->PPA;
+				for (std::list<NVM_Transaction*>::const_iterator it = transactionList.begin(); it != transactionList.end(); it++) {
+					stop_iterate = false;
+					bound_btm_PPA = (((NVM_Transaction_Flash*)(*it))->PPA) / align_unit; bound_btm_PPA *= align_unit;
+					bound_top_PPA = bound_btm_PPA + align_unit;
+					for (int i = 1; i < align_unit;) {
+						int dist = (((NVM_Transaction_Flash*)(*(next(it, i))))->PPA) - (((NVM_Transaction_Flash*)(*it))->PPA);
+						if ((*it)->Type == Transaction_Type::READ) {
+							//std::cout << "[2. host read trs sort debug] dist: " << dist << std::endl;
+							//
+						}
+
+						if (((NVM_Transaction_Flash*)(*(next(it, i))))->PPA == end_PPA_of_arr || abs(dist) >= align_unit) { stop_iterate = true; }
+						if ((abs(dist) < align_unit) && ((((NVM_Transaction_Flash*)(*(next(it, i))))->PPA >= bound_btm_PPA) && (((NVM_Transaction_Flash*)(*(next(it, i))))->PPA < bound_top_PPA))) {
+							if ((*it)->Type == Transaction_Type::WRITE) {
+								((NVM_Transaction_Flash_WR*)(*it))->RelatedWrite_SUB.push_back(((NVM_Transaction_Flash_WR*)(*(next(it, i)))));
+								transactionList.erase(next(it, i)); i--;
+								subpgs_hanged_w++;
+								count--;
+							}
+							else if ((*it)->Type == Transaction_Type::READ) {
+								if (transactionList.size() > 4) {
+									//std::cout<< "trList.size(): "<< transactionList.size() <<", two PPAs:" <<((NVM_Transaction_Flash*)(*it))->Address.ChannelID<<", " << ((NVM_Transaction_Flash*)(*it))->Address.ChipID << ", " << ((NVM_Transaction_Flash*)(*it))->Address.DieID << ", " << ((NVM_Transaction_Flash*)(*it))->Address.PlaneID << ", next tr: " << ((NVM_Transaction_Flash*)(*(next(it, i))))->Address.ChannelID<<", " << ((NVM_Transaction_Flash*)(*(next(it, i))))->Address.ChipID << ", " << ((NVM_Transaction_Flash*)(*(next(it, i))))->Address.DieID << ", " << ((NVM_Transaction_Flash*)(*(next(it, i))))->Address.PlaneID << ", " << std::endl;
+								}
+								if (dist == 0) { //this means there is no lpa-ppa info in Mapping table(first read access). so just delete one because we assume we can read multiple subpgs in page by one shot.
+									transactionList.erase(next(it, i)); i--;
+								}
+								else {
+									((NVM_Transaction_Flash_RD*)(*it))->RelatedRead_SUB.push_back(((NVM_Transaction_Flash_RD*)(*(next(it, i)))));
+									transactionList.erase(next(it, i)); i--;
+									subpgs_hanged_r++;
+								}
+								
+							}
+						}
+						if (stop_iterate) break;
+						i++;
+					}
+					if (*it == transactionList.back()) break;
+					if (((NVM_Transaction_Flash*)(*(next(it, 1))))->PPA == end_PPA_of_arr) { break; }
+				}
+			}
+		}
+
+
+
 		if (transactionList.size() > 0) {
+			int issue_count = 0;
 			ftl->TSU->Prepare_for_transaction_submit();
 			for (std::list<NVM_Transaction*>::const_iterator it = transactionList.begin();
 				it != transactionList.end(); it++) {
 				if (((NVM_Transaction_Flash*)(*it))->Physical_address_determined) {
 					ftl->TSU->Submit_transaction(static_cast<NVM_Transaction_Flash*>(*it));
 					if (((NVM_Transaction_Flash*)(*it))->Type == Transaction_Type::WRITE) {
+						/*
+						if (((NVM_Transaction_Flash_WR*)(*it))->RelatedWrite_SUB != NULL) {
+							std::cout << "RelatedWrite_SUB != NULL, PPA: " <<((NVM_Transaction_Flash_WR*)(*it))-> RelatedWrite_SUB->PPA << std::endl; //checked
+						}
+						*/
 						if (((NVM_Transaction_Flash_WR*)(*it))->RelatedRead != NULL) {
 							ftl->TSU->Submit_transaction(((NVM_Transaction_Flash_WR*)(*it))->RelatedRead);
+
 						}
 					}
 				}
+
+				if (is_write == true) {					
+					issue_count++;
+					if (issue_count == count) {
+						Stats::Host_write_count += issue_count;
+						Stats::Host_write_count_subpgs += (issue_count + subpgs_hanged_w);
+						break;
+					}
+				}
 			}
-			
+
 			ftl->TSU->Schedule();
 		}
+
+
+		Start_servicing_writes_for_overfull();
+
+
+		return count;
 	}
 
 	bool Address_Mapping_Unit_Page_Level::query_cmt(NVM_Transaction_Flash* transaction)
@@ -512,7 +706,6 @@ namespace SSD_Components
 		stream_id_type stream_id = transaction->Stream_id;
 		Stats::total_CMT_queries++;
 		Stats::total_CMT_queries_per_stream[stream_id]++;
-
 		if (domains[stream_id]->Mapping_entry_accessible(ideal_mapping_table, stream_id, transaction->LPA))//Either limited or unlimited CMT
 		{
 			Stats::CMT_hits_per_stream[stream_id]++;
@@ -529,7 +722,7 @@ namespace SSD_Components
 				Stats::writeTR_CMT_hits++;
 				Stats::writeTR_CMT_hits_per_stream[stream_id]++;
 			}
-
+			//
 			if (translate_lpa_to_ppa(stream_id, transaction)) {
 				return true;
 			} else {
@@ -556,6 +749,7 @@ namespace SSD_Components
 					return true;
 				} else {
 					mange_unsuccessful_translation(transaction);
+					PRINT_ERROR("NNNOOOOOOOOOOOOOOOO");
 					return false;
 				}
 			} else {
@@ -586,24 +780,51 @@ namespace SSD_Components
 		PPA_type ppa = domains[streamID]->Get_ppa(ideal_mapping_table, streamID, transaction->LPA);
 
 		if (transaction->Type == Transaction_Type::READ) {
+			//if (ppa == NO_PPA) std::cout << "lpa does not exists in table" << std::endl;
 			if (ppa == NO_PPA) {
 				ppa = online_create_entry_for_reads(transaction->LPA, streamID, transaction->Address, ((NVM_Transaction_Flash_RD*)transaction)->read_sectors_bitmap);
 			}
 			transaction->PPA = ppa;
 			Convert_ppa_to_address(transaction->PPA, transaction->Address);
 			block_manager->Read_transaction_issued(transaction->Address);
+
 			transaction->Physical_address_determined = true;
 			
 			return true;
-		} else {//This is a write transaction
-			allocate_plane_for_user_write((NVM_Transaction_Flash_WR*)transaction);
-			//there are too few free pages remaining only for GC
-			if (ftl->GC_and_WL_Unit->Stop_servicing_writes(transaction->Address)){
-				return false;
+		} else {//This is a write transaction	
+
+			int bypass_count = -1;
+			do{
+				if (bypass_count >= 0){
+					// program bypass - on...	
+					block_manager->Program_transaction_serviced(transaction->Address);
+				}
+				
+				allocate_plane_for_user_write((NVM_Transaction_Flash_WR*)transaction);
+#ifndef EXECUTION_CONTROL 
+				//there are too few free pages remaining only for GC
+				if (ftl->GC_and_WL_Unit->Stop_servicing_writes(transaction->Address)){
+					return false;
+				}
+#endif
+				(user_Alloc_count[((NVM_Transaction_Flash_WR*)transaction)->Stream_id])++;
+
+				allocate_page_in_plane_for_user_write((NVM_Transaction_Flash_WR*)transaction, false);
+
+				bypass_count++;
 			}
-			allocate_page_in_plane_for_user_write((NVM_Transaction_Flash_WR*)transaction, false);
+			while (block_manager->Is_page_bypass(transaction->Address));			
 			transaction->Physical_address_determined = true;
-			
+
+#ifdef EXECUTION_CONTROL 
+			if (bypass_count != 0)
+			{
+				Stats::Relief_page_count += bypass_count;
+				Stats::Interval_Relief_page_count += bypass_count;
+				Stats::Cur_relief_page_count += bypass_count;
+				ftl->GC_and_WL_Unit->Adjust_token(bypass_count);
+			}
+#endif				
 			return true;
 		}
 	}
@@ -641,6 +862,7 @@ namespace SSD_Components
 				lpa_list.erase(lpa++);
 			}
 		}
+		user_Alloc_count[stream_id] = 0;
 
 		//Second: distribute LPAs within planes based on the steady-state status of blocks
 		//unsigned int safe_guard_band = ftl->GC_and_WL_Unit->Get_minimum_number_of_free_pages_before_GC();
@@ -654,17 +876,48 @@ namespace SSD_Components
 						plane_address.PlaneID = domains[stream_id]->Plane_ids[plane_cntr];
 
 						unsigned int physical_block_consumption_goal = (unsigned int)(double(block_no_per_plane - ftl->GC_and_WL_Unit->Get_minimum_number_of_free_pages_before_GC() / 2)
-							* Utils::Logical_Address_Partitioning_Unit::Get_share_of_physcial_pages_in_plane(plane_address.ChannelID, plane_address.ChipID, plane_address.DieID, plane_address.PlaneID));
+							* Utils::Logical_Address_Partitioning_Unit::Get_share_of_physcial_pages_in_plane(plane_address.ChannelID, plane_address.ChipID, plane_address.DieID, plane_address.PlaneID)) - 4;
 
 						//Adjust the average
 						double model_average = 0;
 						std::vector<double> adjusted_steady_state_distribution;
 						//Check if probability distribution is correct 
+#if PATCH_PRECOND
+						for (unsigned int i = 0; i <= pages_no_per_block * ALIGN_UNIT_SIZE; i++) {
+							model_average += steady_state_distribution[i] * double(i) / double(pages_no_per_block * ALIGN_UNIT_SIZE);
+							adjusted_steady_state_distribution.push_back(steady_state_distribution[i]);
+						}
+						//std::cout << "[DEBUG PRECOND] model_average: " << model_average << std::endl;
+						double real_average = double(assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size()) / (physical_block_consumption_goal * pages_no_per_block);
+						//std::cout << "[DEBUG PRECOND] real_average: " << real_average << std::endl;
+						if (std::abs(model_average - real_average) * pages_no_per_block * ALIGN_UNIT_SIZE > 0.9999) {
+							int displacement_index = int((real_average - model_average) * pages_no_per_block * ALIGN_UNIT_SIZE);
+							if (displacement_index > 0) {
+								for (int i = 0; i < displacement_index; i++) {
+									adjusted_steady_state_distribution[i] = 0;
+								}
+								for (int i = displacement_index; i < int(pages_no_per_block * ALIGN_UNIT_SIZE); i++) {
+									adjusted_steady_state_distribution[i] = steady_state_distribution[i - displacement_index];
+								}
+							}
+							else {
+								displacement_index *= -1;
+								for (int i = 0; i < int(pages_no_per_block * ALIGN_UNIT_SIZE) - displacement_index; i++) {
+									adjusted_steady_state_distribution[i] = steady_state_distribution[i + displacement_index];
+								}
+								for (int i = int(pages_no_per_block * ALIGN_UNIT_SIZE) - displacement_index; i < int(pages_no_per_block * ALIGN_UNIT_SIZE); i++) {
+									adjusted_steady_state_distribution[i] = 0;
+								}
+							}
+						}
+#else
 						for (unsigned int i = 0; i <= pages_no_per_block; i++) {
 							model_average += steady_state_distribution[i] * double(i) / double(pages_no_per_block);
 							adjusted_steady_state_distribution.push_back(steady_state_distribution[i]);
 						}
+						std::cout << "[DEBUG] model_average: " << model_average << std::endl;
 						double real_average = double(assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size()) / (physical_block_consumption_goal * pages_no_per_block);
+						std::cout << "[DEBUG PRECOND] real_average: " << real_average << std::endl;
 						if (std::abs(model_average - real_average) * pages_no_per_block > 0.9999) {
 							int displacement_index = int((real_average - model_average) * pages_no_per_block);
 							if (displacement_index > 0) {
@@ -674,7 +927,8 @@ namespace SSD_Components
 								for (int i = displacement_index; i < int(pages_no_per_block); i++) {
 									adjusted_steady_state_distribution[i] = steady_state_distribution[i - displacement_index];
 								}
-							} else {
+							}
+							else {
 								displacement_index *= -1;
 								for (int i = 0; i < int(pages_no_per_block) - displacement_index; i++) {
 									adjusted_steady_state_distribution[i] = steady_state_distribution[i + displacement_index];
@@ -684,17 +938,90 @@ namespace SSD_Components
 								}
 							}
 						}
+#endif
+#if PATCH_PRECOND
+						//Check if it is possible to find a PPA for each LPA with current proability assignments 
+						unsigned int total_valid_pages = 0;
+						for (int valid_pages_in_block = pages_no_per_block * ALIGN_UNIT_SIZE; valid_pages_in_block >= 0; valid_pages_in_block--) {
+							total_valid_pages += valid_pages_in_block * (unsigned int)(adjusted_steady_state_distribution[valid_pages_in_block] * physical_block_consumption_goal);
+						}
+						//std::cout << "[DEBUG PRECOND] total_valid_pages: " << total_valid_pages << std::endl; //ALIGN_UNIT_SIZE 4 case is 4 times bigger than ALIGN~ 1 case.
+						unsigned int pages_need_PPA = 0;//The number of LPAs that remain unassigned due to imperfect probability assignments
+						if (total_valid_pages < assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size()) {
+							pages_need_PPA = (unsigned int)(assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size()) - total_valid_pages;
+						}
 
+						unsigned int remaining_blocks_to_consume = physical_block_consumption_goal;
+						for (int valid_pages_in_block = pages_no_per_block * ALIGN_UNIT_SIZE; valid_pages_in_block >= 0; valid_pages_in_block--) {
+							//std::cout << "[DEBUG PRECOND] physical_block_consumption_goal: " << physical_block_consumption_goal << std::endl; //consume blocks per plane
+							unsigned int block_no_with_x_valid_page = (unsigned int)(adjusted_steady_state_distribution[valid_pages_in_block] * physical_block_consumption_goal);
+							if (block_no_with_x_valid_page > 0 && pages_need_PPA > 0) {
+								block_no_with_x_valid_page += (pages_need_PPA / valid_pages_in_block) + (pages_need_PPA % valid_pages_in_block == 0 ? 0 : 1);
+								pages_need_PPA = 0;
+							}
+
+							if (block_no_with_x_valid_page <= remaining_blocks_to_consume) {
+								remaining_blocks_to_consume -= block_no_with_x_valid_page;
+							}
+							else {
+								block_no_with_x_valid_page = remaining_blocks_to_consume;
+								remaining_blocks_to_consume = 0;
+							}
+
+							//std::cout << block_no_with_x_valid_page << ", ";
+							for (unsigned int block_cntr = 0; block_cntr < block_no_with_x_valid_page; block_cntr++) {
+								//Assign physical addresses
+								std::vector<NVM::FlashMemory::Physical_Page_Address> addresses;
+								if (assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size() < valid_pages_in_block) {
+									valid_pages_in_block = int(assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size());
+								}
+								//std::cout << "[DEBUG PRECOND] target Valid sub-pages_in_block: " << valid_pages_in_block << std::endl;
+								for (int page_cntr = 0; page_cntr < valid_pages_in_block; page_cntr++) {
+									NVM::FlashMemory::Physical_Page_Address addr(plane_address.ChannelID, plane_address.ChipID, plane_address.DieID, plane_address.PlaneID, 0, 0);
+									addresses.push_back(addr);
+								}
+
+								block_manager->Allocate_Pages_in_block_and_invalidate_remaining_for_preconditioning(stream_id, plane_address, addresses);
+								int cnt = 0;
+								//Update mapping table
+								for (auto const& address : addresses) {
+									LPA_type lpa = assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].back();
+									assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].pop_back();
+									PPA_type ppa = Convert_address_to_ppa(address);
+									flash_controller->Change_memory_status_preconditioning(&address, &lpa);
+									domains[stream_id]->GlobalMappingTable[lpa].PPA = ppa;
+									domains[stream_id]->GlobalMappingTable[lpa].WrittenStateBitmap = (*lpa_list.find(lpa)).second;
+									//printf("[DEBUG PRECOND] (Allocate_address_for_precond~) access_status_bitmap: 0x%lx\n", domains[stream_id]->GlobalMappingTable[lpa].WrittenStateBitmap);  //0x1 
+									domains[stream_id]->GlobalMappingTable[lpa].TimeStamp = 0;
+									cnt++;
+#if PATCH_PRECOND
+									//if (lpa == 18608096 || lpa == 16074761 || lpa == 49683048 || lpa == 5397669 || lpa == 3094385) {
+									if (lpa == 106885) {
+										//std::cout << "[DEBUG PRECOND] (preconditioning update CMT entry) lpa: " << lpa << ", ppa: " << ppa << ", address: " << address.ChannelID << address.ChipID << address.DieID << address.PlaneID << " blk: "<<address.BlockID << " pg: "<<address.PageID <<" sub: "<< address.subPageID << std::endl;;
+										//std::cout << std::endl;
+									}
+									if (lpa == 84387) {
+										//std::cout << "[DEBUG PRECOND] (preconditioning update CMT entry) lpa: " << lpa << ", ppa: " << ppa << ", address: " << address.ChannelID << address.ChipID << address.DieID << address.PlaneID << " blk: " << address.BlockID << " pg: " << address.PageID << " sub: " << address.subPageID << std::endl;;
+										//std::cout << std::endl;
+									}
+
+#endif
+								}
+								//std::cout << "[DEBUG PRECOND] updated entries: " << cnt << std::endl;
+							}
+						}
+#else
 						//Check if it is possible to find a PPA for each LPA with current proability assignments 
 						unsigned int total_valid_pages = 0;
 						for (int valid_pages_in_block = pages_no_per_block; valid_pages_in_block >= 0; valid_pages_in_block--) {
 							total_valid_pages += valid_pages_in_block * (unsigned int)(adjusted_steady_state_distribution[valid_pages_in_block] * physical_block_consumption_goal);
 						}
+						std::cout << "[DEBUG PRECODN] total_valid_pages: " << total_valid_pages << std::endl;
 						unsigned int pages_need_PPA = 0;//The number of LPAs that remain unassigned due to imperfect probability assignments
 						if (total_valid_pages < assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size()) {
 							pages_need_PPA = (unsigned int)(assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size()) - total_valid_pages;
 						}
-						
+
 						unsigned int remaining_blocks_to_consume = physical_block_consumption_goal;
 						for (int valid_pages_in_block = pages_no_per_block; valid_pages_in_block >= 0; valid_pages_in_block--) {
 							unsigned int block_no_with_x_valid_page = (unsigned int)(adjusted_steady_state_distribution[valid_pages_in_block] * physical_block_consumption_goal);
@@ -705,11 +1032,13 @@ namespace SSD_Components
 
 							if (block_no_with_x_valid_page <= remaining_blocks_to_consume) {
 								remaining_blocks_to_consume -= block_no_with_x_valid_page;
-							} else {
+							}
+							else {
 								block_no_with_x_valid_page = remaining_blocks_to_consume;
 								remaining_blocks_to_consume = 0;
 							}
 
+							//std::cout << block_no_with_x_valid_page << ", ";
 							for (unsigned int block_cntr = 0; block_cntr < block_no_with_x_valid_page; block_cntr++) {
 								//Assign physical addresses
 								std::vector<NVM::FlashMemory::Physical_Page_Address> addresses;
@@ -723,7 +1052,7 @@ namespace SSD_Components
 								block_manager->Allocate_Pages_in_block_and_invalidate_remaining_for_preconditioning(stream_id, plane_address, addresses);
 
 								//Update mapping table
-								for (auto const &address : addresses) {
+								for (auto const& address : addresses) {
 									LPA_type lpa = assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].back();
 									assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].pop_back();
 									PPA_type ppa = Convert_address_to_ppa(address);
@@ -734,8 +1063,10 @@ namespace SSD_Components
 								}
 							}
 						}
+#endif
 						if (assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size() > 0) {
-							PRINT_ERROR("It is not possible to assign PPA to all LPAs in Allocate_address_for_preconditioning! It is not safe to continue preconditioning." << assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size())
+							//PRINT_ERROR("It is not possible to assign PPA to all LPAs in Allocate_address_for_preconditioning! It is not safe to continue preconditioning." << assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size())
+							PRINT_MESSAGE("It is not possible to assign PPA to all LPAs in Allocate_address_for_preconditioning! : " << (double)assigned_lpas[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID].size());
 						}
 					}
 				}
@@ -753,6 +1084,32 @@ namespace SSD_Components
 		}
 		delete[] assigned_lpas;
 	}
+
+	void Address_Mapping_Unit_Page_Level::Allocate_dummy_pages_for_gc(NVM_Transaction_Flash_WR* transaction, bool is_translation_page, bool align)
+	{
+		if (is_translation_page == true) {
+			return;
+		}
+
+		do {
+			allocate_plane_for_user_write(transaction, true);
+			if ((align == true) && (transaction->Address.ChannelID == 0) && (transaction->Address.ChipID == 0) && (transaction->Address.DieID == 0) && (transaction->Address.PlaneID == 0))
+			{
+				break;
+			}
+			(gc_Alloc_count[transaction->Stream_id])++;
+
+			block_manager->Allocate_block_and_page_in_plane_for_gc_write(transaction->Stream_id, transaction->Address);
+			if (transaction->Stream_id != 0) {
+				std::cout << "transaction->Stream_id != 0 (Allocate_dummy_pages_for_gc)" << std::endl;
+				exit(1);
+			}
+			//std::cout << "[GC DEBUG] dummy writed..and invalidate the dummy page: blk.pg.subpg: " << transaction->Address.ChannelID << ", " << transaction->Address.ChipID << ", " << transaction->Address.DieID << ", " << transaction->Address.PlaneID << ", " << transaction->Address.BlockID << ", pg" << transaction->Address.PageID << ", " << transaction->Address.subPageID << std::endl;
+
+			block_manager->Invalidate_subpage_in_block(transaction->Stream_id, transaction->Address);
+		} 		while (align);
+	}
+
 
 	void Address_Mapping_Unit_Page_Level::Allocate_new_page_for_gc(NVM_Transaction_Flash_WR* transaction, bool is_translation_page)
 	{
@@ -787,9 +1144,34 @@ namespace SSD_Components
 				domains[transaction->Stream_id]->CMT->Insert_new_mapping_info(transaction->Stream_id, transaction->LPA, Convert_address_to_ppa(transaction->Address), transaction->write_sectors_bitmap);
 			}
 
+#if 0
+			// global GC stripping
+			allocate_plane_for_user_write(transaction, true);
+			(gc_Alloc_count[transaction->Stream_id])++;
+
 			allocate_page_in_plane_for_user_write(transaction, true);
 			transaction->Physical_address_determined = true;
+#else
+			int bypass_count = -1;
+			do{				
+				// global GC stripping
+				allocate_plane_for_user_write(transaction, true);
+				(gc_Alloc_count[transaction->Stream_id])++;
 
+				allocate_page_in_plane_for_user_write(transaction, true);
+				bypass_count++;
+			}
+			while (block_manager->Is_page_bypass(transaction->Address));			
+			transaction->Physical_address_determined = true;
+
+			if (bypass_count != 0)
+			{
+				Stats::Relief_page_count += bypass_count;
+				Stats::Interval_Relief_page_count += bypass_count;
+				Stats::Cur_relief_page_count += bypass_count;
+				ftl->GC_and_WL_Unit->Adjust_token(bypass_count);
+			}
+#endif
 			//the mapping entry should be updated
 			stream_id_type stream_id = transaction->Stream_id;
 			Stats::total_CMT_queries++;
@@ -830,6 +1212,8 @@ namespace SSD_Components
 	void Address_Mapping_Unit_Page_Level::allocate_plane_for_preconditioning(stream_id_type stream_id, LPA_type lpn, NVM::FlashMemory::Physical_Page_Address& targetAddress)
 	{
 		AddressMappingDomain* domain = domains[stream_id];
+		//// Dynamic Plane Allocation.
+		lpn = (user_Alloc_count[stream_id])++;
 
 		switch (domain->PlaneAllocationScheme) {
 			case Flash_Plane_Allocation_Scheme_Type::CWDP:
@@ -983,12 +1367,28 @@ namespace SSD_Components
 				PRINT_ERROR("Unknown plane allocation scheme type!")
 		}
 	}
-
-	void Address_Mapping_Unit_Page_Level::allocate_plane_for_user_write(NVM_Transaction_Flash_WR* transaction)
+	
+	void Address_Mapping_Unit_Page_Level::allocate_plane_for_user_write(NVM_Transaction_Flash_WR* transaction, bool is_for_gc)
 	{
 		LPA_type lpn = transaction->LPA;
 		NVM::FlashMemory::Physical_Page_Address& targetAddress = transaction->Address;
 		AddressMappingDomain* domain = domains[transaction->Stream_id];
+
+//// STATIC Plane Allocation.
+#if 0
+		lpn = transaction->LPA;
+//// Dynamic Plane Allocation.
+#else
+		if (is_for_gc == false)
+		{
+			lpn = user_Alloc_count[transaction->Stream_id];
+	//		lpn = (user_Alloc_count[0])++;
+		}
+		else
+		{
+			lpn = gc_Alloc_count[transaction->Stream_id];
+		}
+#endif
 
 		switch (domain->PlaneAllocationScheme) {
 			case Flash_Plane_Allocation_Scheme_Type::CWDP:
@@ -1107,6 +1507,7 @@ namespace SSD_Components
 				targetAddress.ChipID = domain->Chip_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no)) % domain->Chip_no)];
 				targetAddress.DieID = domain->Die_ids[(unsigned int)((lpn / (domain->Plane_no * domain->Channel_no * domain->Chip_no)) % domain->Die_no)];
 				targetAddress.PlaneID = domain->Plane_ids[(unsigned int)(lpn % domain->Plane_no)];
+				//std::cout << "[debug] cha,chip,Die,Plane: " << targetAddress.ChannelID<<", " << targetAddress.ChipID << ", " << targetAddress.DieID << ", " << targetAddress.PlaneID << ", " << std::endl;
 				break;
 			case Flash_Plane_Allocation_Scheme_Type::PCDW:
 				targetAddress.ChannelID = domain->Channel_ids[(unsigned int)((lpn / domain->Plane_no) % domain->Channel_no)];
@@ -1147,7 +1548,9 @@ namespace SSD_Components
 	{
 		AddressMappingDomain* domain = domains[transaction->Stream_id];
 		PPA_type old_ppa = domain->Get_ppa(ideal_mapping_table, transaction->Stream_id, transaction->LPA);
+		NVM::FlashMemory::Physical_Page_Address addr_debug; bool is_for_USER = false;
 
+		//step1. invalidate previous (old) page and assign update read (if NAND Page size is not same to mapping granularity)
 		if (old_ppa == NO_PPA)  /*this is the first access to the logical page*/
 		{
 			if (is_for_gc) {
@@ -1157,31 +1560,72 @@ namespace SSD_Components
 			if (is_for_gc) {
 				NVM::FlashMemory::Physical_Page_Address addr;
 				Convert_ppa_to_address(old_ppa, addr);
-				block_manager->Invalidate_page_in_block(transaction->Stream_id, addr);
+
+				if (transaction->Stream_id != 0) {
+					std::cout << "transaction->Stream_id != 0 (allocate_page_in_plane_for_user_write flag2)" << std::endl;
+					exit(1);
+				}
+#if PATCH_PRECOND
+				addr_debug = addr;
+#endif
+				//std::cout << "[GC DEBUG] invalidate blk.pg.subpg: " << addr.ChannelID << ", " << addr.ChipID << ", " << addr.DieID << ", " << addr.PlaneID << ", " << addr.BlockID << ", pg" << addr.PageID << ", " << addr.subPageID <<  std::endl;
+			
+				block_manager->Invalidate_subpage_in_block(transaction->Stream_id, addr);
+
 				page_status_type page_status_in_cmt = domain->Get_page_status(ideal_mapping_table, transaction->Stream_id, transaction->LPA);
 				if (page_status_in_cmt != transaction->write_sectors_bitmap)
 					PRINT_ERROR("Unexpected mapping table status in allocate_page_in_plane_for_user_write for a GC/WL write!")
 			} else {
 				page_status_type prev_page_status = domain->Get_page_status(ideal_mapping_table, transaction->Stream_id, transaction->LPA);
+				//printf("prev_page_status: %lx, tr->write_sectors_bitmap: %lx\n", prev_page_status, transaction->write_sectors_bitmap);
 				page_status_type status_intersection = transaction->write_sectors_bitmap & prev_page_status;
 				//check if an update read is required
 				if (status_intersection == prev_page_status) {
 					NVM::FlashMemory::Physical_Page_Address addr;
 					Convert_ppa_to_address(old_ppa, addr);
-					block_manager->Invalidate_page_in_block(transaction->Stream_id, addr);
+
+#if PATCH_PRECOND
+					addr_debug = addr;
+					is_for_USER = true;
+#endif
+					//std::cout << "old_ppa: " << old_ppa << std::endl;
+					//std::cout << "old_addr(ch,chip,die,plane,block,pg): " << addr.ChannelID <<", "<< addr.ChipID << ", " << addr.DieID << ", " << addr.PlaneID << ", " << addr.BlockID << ", " << addr.PageID << std::endl;
+
+					if (transaction->Stream_id != 0) {
+						std::cout << "transaction->Stream_id != 0 (allocate_page_in_plane_for_user_write flag2)" << std::endl;
+						exit(1);
+					}
+					block_manager->Invalidate_subpage_in_block(transaction->Stream_id, addr);
+
 				} else {
 					page_status_type read_pages_bitmap = status_intersection ^ prev_page_status;
+
+					Stats::Additional_WAF_by_mapping += count_sector_no_from_status_bitmap(read_pages_bitmap);
+					Total_RMW_SEC = Stats::Additional_WAF_by_mapping;
+					
+
+
+					if (transaction->Address.ChannelID == 3 && transaction->Address.ChipID == 0 && transaction->Address.DieID == 0 && transaction->Address.PlaneID == 1 && transaction->Address.BlockID == 255 && transaction->Address.PageID == 0 && transaction->Address.subPageID == 1) {
+						std::cout << "USER invalidate 3 0 0 1 255 0 1" << std::endl;
+					}
+
 					NVM_Transaction_Flash_RD *update_read_tr = new NVM_Transaction_Flash_RD(transaction->Source, transaction->Stream_id,
 						count_sector_no_from_status_bitmap(read_pages_bitmap) * SECTOR_SIZE_IN_BYTE, transaction->LPA, old_ppa, transaction->UserIORequest,
 						transaction->Content, transaction, read_pages_bitmap, domain->GlobalMappingTable[transaction->LPA].TimeStamp);
 					Convert_ppa_to_address(old_ppa, update_read_tr->Address);
 					block_manager->Read_transaction_issued(update_read_tr->Address);//Inform block manager about a new transaction as soon as the transaction's target address is determined
-					block_manager->Invalidate_page_in_block(transaction->Stream_id, update_read_tr->Address);
+					if (transaction->Stream_id != 0) {
+						std::cout << "transaction->Stream_id != 0 (allocate_page_in_plane_for_user_write flag3)" << std::endl;
+						exit(1);
+					}
+					block_manager->Invalidate_subpage_in_block(transaction->Stream_id, update_read_tr->Address);
+
 					transaction->RelatedRead = update_read_tr;
 				}
 			}
 		}
 
+		//step 2. assign new page to write data + update mapping info
 		/*The following lines should not be ordered with respect to the block_manager->Invalidate_page_in_block
 		* function call in the above code blocks. Otherwise, GC may be invoked (due to the call to Allocate_block_....) and
 		* may decide to move a page that is just invalidated.*/
@@ -1191,13 +1635,16 @@ namespace SSD_Components
 			block_manager->Allocate_block_and_page_in_plane_for_user_write(transaction->Stream_id, transaction->Address);
 		}
 		transaction->PPA = Convert_address_to_ppa(transaction->Address);
+
+
 		domain->Update_mapping_info(ideal_mapping_table, transaction->Stream_id, transaction->LPA, transaction->PPA,
 			((NVM_Transaction_Flash_WR*)transaction)->write_sectors_bitmap | domain->Get_page_status(ideal_mapping_table, transaction->Stream_id, transaction->LPA));
 	}
 
 	void Address_Mapping_Unit_Page_Level::allocate_plane_for_translation_write(NVM_Transaction_Flash* transaction)
 	{
-		allocate_plane_for_user_write((NVM_Transaction_Flash_WR*)transaction);
+		allocate_plane_for_user_write((NVM_Transaction_Flash_WR*)transaction);		
+		(user_Alloc_count[transaction->Stream_id])++;
 	}
 
 	void Address_Mapping_Unit_Page_Level::allocate_page_in_plane_for_translation_write(NVM_Transaction_Flash* transaction, MVPN_type mvpn, bool is_for_gc)
@@ -1213,18 +1660,58 @@ namespace SSD_Components
 		} else {
 			NVM::FlashMemory::Physical_Page_Address prevAddr;
 			Convert_ppa_to_address(old_MPPN, prevAddr);
-			block_manager->Invalidate_page_in_block(transaction->Stream_id, prevAddr);
+
+			if (transaction->Stream_id != 0) {
+				std::cout << "transaction->Stream_id != 0 (allocate_page_in_plane_for_translation_write)" << std::endl;
+				exit(1);
+			}
+			block_manager->Invalidate_subpage_in_block(transaction->Stream_id, prevAddr);
+
 		}
 
 		block_manager->Allocate_block_and_page_in_plane_for_translation_write(transaction->Stream_id, transaction->Address, false);
 		transaction->PPA = Convert_address_to_ppa(transaction->Address);
+		//std::cout << "[debug1-translate-W] tr->addr(ch,chip,die,plane,block,pg): " << transaction->Address.ChannelID << ", " << transaction->Address.ChipID << ", " << transaction->Address.DieID << ", " << transaction->Address.PlaneID << ", " << transaction->Address.BlockID << ", " << transaction->Address.PageID << std::endl;
+		//std::cout << "[debug2-translate-W] tr->PPA: " << transaction->PPA << std::endl;
 		domain->GlobalTranslationDirectory[mvpn].MPPN = (MPPN_type)transaction->PPA;
 		domain->GlobalTranslationDirectory[mvpn].TimeStamp = CurrentTimeStamp;
 	}
 
-	PPA_type Address_Mapping_Unit_Page_Level::online_create_entry_for_reads(LPA_type lpa, const stream_id_type stream_id, NVM::FlashMemory::Physical_Page_Address& read_address, uint64_t read_sectors_bitmap)
+	PPA_type Address_Mapping_Unit_Page_Level::online_create_entry_for_reads(LPA_type lpn, const stream_id_type stream_id, NVM::FlashMemory::Physical_Page_Address& read_address, uint64_t read_sectors_bitmap)
 	{
 		AddressMappingDomain* domain = domains[stream_id];
+		
+		//// STATIC Plane Allocation.
+		LPA_type lpa = lpn;
+		//// Dynamic Plane Allocation.
+		static int count = 0;
+		static int subpg_offset = 0;
+
+#if PATCH_ONLINE_CREATE_READ_SUBPG
+#if STATIC_ALLOC_ONLINE
+		lpa = lpn;
+#elif DYNAMIC_ALLOC_ONLINE
+		subpg_offset++;
+		if (subpg_offset % ALIGN_UNIT_SIZE == 0) {
+			count++;
+			lpa = count;
+			subpg_offset = 0;
+		}
+		else {
+			lpa = count;
+		}
+#endif
+#else
+		
+#if STATIC_ALLOC_ONLINE
+		//// STATIC Plane Allocation.
+		lpa = lpn;
+#elif DYNAMIC_ALLOC_ONLINE
+		//// Dynamic Plane Allocation.
+		lpa = count++;
+#endif
+#endif
+
 		switch (domain->PlaneAllocationScheme) {
 			//Static: Channel first
 			case Flash_Plane_Allocation_Scheme_Type::CWDP:
@@ -1378,9 +1865,9 @@ namespace SSD_Components
 				PRINT_ERROR("Unknown plane allocation scheme type!")
 		}
 
-		block_manager->Allocate_block_and_page_in_plane_for_user_write(stream_id, read_address);
+		//block_manager->Allocate_block_and_page_in_plane_for_user_write(stream_id, read_address);
 		PPA_type ppa = Convert_address_to_ppa(read_address);
-		domain->Update_mapping_info(ideal_mapping_table, stream_id, lpa, ppa, read_sectors_bitmap);
+		//domain->Update_mapping_info(ideal_mapping_table, stream_id, lpn, ppa, read_sectors_bitmap);
 
 		return ppa;
 	}
@@ -1438,20 +1925,24 @@ namespace SSD_Components
 
 	inline void Address_Mapping_Unit_Page_Level::Convert_ppa_to_address(const PPA_type ppn, NVM::FlashMemory::Physical_Page_Address& address)
 	{
-		address.ChannelID = (flash_channel_ID_type)(ppn / page_no_per_channel);
-		address.ChipID = (flash_chip_ID_type)((ppn % page_no_per_channel) / page_no_per_chip);
-		address.DieID = (flash_die_ID_type)(((ppn % page_no_per_channel) % page_no_per_chip) / page_no_per_die);
-		address.PlaneID = (flash_plane_ID_type)((((ppn % page_no_per_channel) % page_no_per_chip) % page_no_per_die) / page_no_per_plane);
-		address.BlockID = (flash_block_ID_type)(((((ppn % page_no_per_channel) % page_no_per_chip) % page_no_per_die) % page_no_per_plane) / pages_no_per_block);
-		address.PageID = (flash_page_ID_type)((((((ppn % page_no_per_channel) % page_no_per_chip) % page_no_per_die) % page_no_per_plane) % pages_no_per_block) % pages_no_per_block);
 
+		address.ChannelID = (flash_channel_ID_type)(ppn / (page_no_per_channel*ALIGN_UNIT_SIZE));
+		address.ChipID = (flash_chip_ID_type)((ppn % (page_no_per_channel * ALIGN_UNIT_SIZE)) / (page_no_per_chip*ALIGN_UNIT_SIZE));
+		address.DieID = (flash_die_ID_type)(((ppn % (page_no_per_channel * ALIGN_UNIT_SIZE)) % (page_no_per_chip * ALIGN_UNIT_SIZE)) / (page_no_per_die * ALIGN_UNIT_SIZE));
+		address.PlaneID = (flash_plane_ID_type)((((ppn % (page_no_per_channel * ALIGN_UNIT_SIZE)) % (page_no_per_chip * ALIGN_UNIT_SIZE)) % (page_no_per_die * ALIGN_UNIT_SIZE)) / (page_no_per_plane * ALIGN_UNIT_SIZE));
+		address.BlockID = (flash_block_ID_type)(((((ppn % (page_no_per_channel * ALIGN_UNIT_SIZE)) % (page_no_per_chip * ALIGN_UNIT_SIZE)) % (page_no_per_die * ALIGN_UNIT_SIZE)) % (page_no_per_plane * ALIGN_UNIT_SIZE)) / (pages_no_per_block*ALIGN_UNIT_SIZE));
+		address.PageID = (flash_page_ID_type)((((((ppn % (page_no_per_channel * ALIGN_UNIT_SIZE)) % (page_no_per_chip * ALIGN_UNIT_SIZE)) % (page_no_per_die * ALIGN_UNIT_SIZE)) % (page_no_per_plane * ALIGN_UNIT_SIZE)) % (pages_no_per_block * ALIGN_UNIT_SIZE)) / (1*ALIGN_UNIT_SIZE));
+		//address.PageID = (flash_page_ID_type)((((((ppn % (page_no_per_channel * ALIGN_UNIT_SIZE)) % (page_no_per_chip * ALIGN_UNIT_SIZE)) % (page_no_per_die * ALIGN_UNIT_SIZE)) % (page_no_per_plane * ALIGN_UNIT_SIZE)) % (pages_no_per_block * ALIGN_UNIT_SIZE)) % pages_no_per_block / ALIGN_UNIT_SIZE);
+		address.subPageID = (flash_page_ID_type)(((((((ppn % (page_no_per_channel * ALIGN_UNIT_SIZE)) % (page_no_per_chip * ALIGN_UNIT_SIZE)) % (page_no_per_die * ALIGN_UNIT_SIZE)) % (page_no_per_plane * ALIGN_UNIT_SIZE)) % (pages_no_per_block * ALIGN_UNIT_SIZE)) % (1*ALIGN_UNIT_SIZE)) % ALIGN_UNIT_SIZE);
 	}
 
 	inline PPA_type Address_Mapping_Unit_Page_Level::Convert_address_to_ppa(const NVM::FlashMemory::Physical_Page_Address& pageAddress)
 	{
-		return (PPA_type)this->page_no_per_chip * (PPA_type)(pageAddress.ChannelID * this->chip_no_per_channel + pageAddress.ChipID)
-			+ this->page_no_per_die * pageAddress.DieID + this->page_no_per_plane * pageAddress.PlaneID
-			+ this->pages_no_per_block * pageAddress.BlockID + pageAddress.PageID;
+		//std::cout << "subPageID: " << pageAddress.subPageID << std::endl;
+		return (PPA_type)this->page_no_per_chip * ALIGN_UNIT_SIZE * (PPA_type)(pageAddress.ChannelID * this->chip_no_per_channel + pageAddress.ChipID)
+			+ this->page_no_per_die * ALIGN_UNIT_SIZE * pageAddress.DieID + this->page_no_per_plane *ALIGN_UNIT_SIZE * pageAddress.PlaneID
+			+ this->pages_no_per_block * ALIGN_UNIT_SIZE * pageAddress.BlockID + pageAddress.PageID * ALIGN_UNIT_SIZE + pageAddress.subPageID;
+
 	}
 
 	bool Address_Mapping_Unit_Page_Level::request_mapping_entry(const stream_id_type stream_id, const LPA_type lpa)
@@ -1906,6 +2397,11 @@ namespace SSD_Components
 		}
 	}
 
+	void Address_Mapping_Unit_Page_Level::manage_unsuccessful_write(NVM_Transaction_Flash* transaction)
+	{
+		Write_transactions_for_overfull.push_back((NVM_Transaction_Flash_WR*)transaction);
+	}
+
 	void Address_Mapping_Unit_Page_Level::mange_unsuccessful_translation(NVM_Transaction_Flash* transaction)
 	{
 		//Currently, the only unsuccessfull translation would be for program translations that are accessing a plane that is running out of free pages
@@ -1914,6 +2410,8 @@ namespace SSD_Components
 
 	void Address_Mapping_Unit_Page_Level::Start_servicing_writes_for_overfull_plane(const NVM::FlashMemory::Physical_Page_Address plane_address)
 	{
+		static int overfull_plane = 0;
+		
 		std::set<NVM_Transaction_Flash_WR*>& waiting_write_list = Write_transactions_for_overfull_planes[plane_address.ChannelID][plane_address.ChipID][plane_address.DieID][plane_address.PlaneID];
 
 		ftl->TSU->Prepare_for_transaction_submit();
@@ -1925,6 +2423,7 @@ namespace SSD_Components
 					ftl->TSU->Submit_transaction((*program)->RelatedRead);
 				}
 				waiting_write_list.erase(program++);
+				overfull_plane++;
 			}
 			else {
 				break;
@@ -1932,4 +2431,61 @@ namespace SSD_Components
 		}
 		ftl->TSU->Schedule();
 	}
+
+
+	int Address_Mapping_Unit_Page_Level::Start_servicing_writes_for_overfull()
+	{
+		int overfull = 0;
+		int issue_count;
+		bool service_writes_for_overfull_debug = false;
+		int service_writes_for_overfull_cnt_debug = 0;
+
+		do {		
+			issue_count = 0;
+			NVM::FlashMemory::Physical_Page_Address address;
+			if ((_my_instance->Write_transactions_for_overfull.size() >= _my_instance->flush_unit_count) &&
+#ifdef EXECUTION_CONTROL	
+				(_my_instance->ftl->GC_and_WL_Unit->Consume_token(_my_instance->flush_unit_count) == true)){
+#else 
+				(_my_instance->ftl->GC_and_WL_Unit->Stop_servicing_writes(address) == false)){
+#endif
+			     
+				service_writes_for_overfull_debug = true;
+				ftl->TSU->Prepare_for_transaction_submit();
+
+				auto program = Write_transactions_for_overfull.begin();
+				while (program != Write_transactions_for_overfull.end()){
+					if (translate_lpa_to_ppa((*program)->Stream_id, *program)) {
+						ftl->TSU->Submit_transaction(*program);
+						if ((*program)->RelatedRead != NULL) {
+							ftl->TSU->Submit_transaction((*program)->RelatedRead);
+						}
+						
+						program++;
+
+						//Write_transactions_for_overfull.erase(program++);
+						Write_transactions_for_overfull.pop_front();	
+						issue_count++;
+						service_writes_for_overfull_cnt_debug++;
+						if (issue_count == flush_unit_count)
+						{
+							break;
+						}
+					}
+					else {
+						break;
+					}
+				}	
+				ftl->TSU->Schedule();
+			}
+
+			overfull += issue_count;
+		} while (issue_count != 0);
+		
+		if (GC_on_for_debug && service_writes_for_overfull_debug) {
+			subpgs_host_w_debug += service_writes_for_overfull_cnt_debug;
+			////std::cout << "host subpgs W (overful): " << subpgs_host_w_debug << ", ";
+		}
+		return overfull;
+	}	
 }

@@ -171,11 +171,53 @@ namespace SSD_Components {
 		dieBKE->ActiveCommand = new NVM::FlashMemory::Flash_Command();
 		for (std::list<NVM_Transaction_Flash*>::iterator it = transaction_list.begin();
 			it != transaction_list.end(); it++) {
+				/*
+				if ((*it)->Source == Transaction_Source_Type::GC_WL) {
+					std::cout << "GC_WL read (send_command_to_chip)" << std::endl;
+				}
+				*/
+				if ((*it)->Stream_id != 0) {
+					std::cout << "[ERROR] stream_id: (send_command_to_chip)" << (*it)->Stream_id << std::endl;
+					exit(1);
+				}
 			dieBKE->ActiveTransactions.push_back(*it);
+			//
+
+			(*it)->Address.isPrimaryPage = true;
+
 			dieBKE->ActiveCommand->Address.push_back((*it)->Address);
 			NVM::FlashMemory::PageMetadata metadata;
 			metadata.LPA = (*it)->LPA;
+
+
+
 			dieBKE->ActiveCommand->Meta_data.push_back(metadata);
+
+
+			
+			//if ((((NVM_Transaction_Flash_WR*)(*it))->RelatedWrite_SUB != NULL) && ((((NVM_Transaction_Flash*)(*it))->Physical_address_determined))) {
+			//std::cout << "[DEBUG GC] (NVM_Transaction_Flash_WR*)(*it))->RelatedWrite_SUB.size(): " << ((NVM_Transaction_Flash_WR*)(*it))->RelatedWrite_SUB.size() << std::endl;
+			if ((((NVM_Transaction_Flash_WR*)(*it))->RelatedWrite_SUB.size() != 0) && ((((NVM_Transaction_Flash*)(*it))->Physical_address_determined))) {
+				for (int idx = 0; idx < ((NVM_Transaction_Flash_WR*)(*it))->RelatedWrite_SUB.size(); idx++) {
+					dieBKE->ActiveCommand->Addresses_subpgs.push_back(((NVM_Transaction_Flash_WR*)(*it))->RelatedWrite_SUB[idx]->Address);
+					NVM::FlashMemory::SubPageMetadata metadata_subpg;
+					metadata_subpg.LPA = ((NVM_Transaction_Flash_WR*)(*it))->RelatedWrite_SUB[idx]->LPA;
+					dieBKE->ActiveCommand->Meta_datas_subpgs.push_back(metadata_subpg);
+				}
+			}
+
+			//std::cout << "[DEBUG GC] (NVM_Transaction_Flash_RD*)(*it))->RelatedRead_SUB.size(): " << ((NVM_Transaction_Flash_RD*)(*it))->RelatedRead_SUB.size() << std::endl;
+			if ((((NVM_Transaction_Flash_RD*)(*it))->RelatedRead_SUB.size() != 0) && ((*it)->Type == Transaction_Type::READ)) {
+				for (int idx = 0; idx < ((NVM_Transaction_Flash_RD*)(*it))->RelatedRead_SUB.size(); idx++) {
+					dieBKE->ActiveCommand->Addresses_subpgs.push_back(((NVM_Transaction_Flash_RD*)(*it))->RelatedRead_SUB[idx]->Address);
+					NVM::FlashMemory::SubPageMetadata metadata_subpg;
+					//when this is read tr, LPA is NO_LPA. LPA is assigned in Flash_Chip::finish_command_execution().
+					metadata_subpg.LPA = ((NVM_Transaction_Flash_RD*)(*it))->RelatedRead_SUB[idx]->LPA;
+					dieBKE->ActiveCommand->Meta_datas_subpgs.push_back(metadata_subpg);
+				}
+			}
+
+
 		}
 
 		switch (transaction_list.front()->Type) {
@@ -231,9 +273,16 @@ namespace SSD_Components {
 						data_transfer_time += NVDDR2DataInTransferTime((*it)->Data_and_metadata_size_in_byte, target_channel);
 					}
 					if (chipBKE->OngoingDieCMDTransfers.size() == 0) {
+
+
 						targetChip->StartCMDDataInXfer();
 						chipBKE->Status = ChipStatus::CMD_DATA_IN;
 						chipBKE->Last_transfer_finish_time = Simulator->Time() + suspendTime + target_channel->ProgramCommandTime[transaction_list.size()] + data_transfer_time;
+
+						if (transaction_list.front()->Source == Transaction_Source_Type::GC_WL) {
+							//std::cout << "[DEBUG GC-Send_command_to_chip()] register GC write " << std::endl;
+						}
+
 						Simulator->Register_sim_event(Simulator->Time() + suspendTime + target_channel->ProgramCommandTime[transaction_list.size()] + data_transfer_time,
 							this, dieBKE, (int)NVDDR2_SimEventType::PROGRAM_CMD_ADDR_DATA_TRANSFERRED);
 					} else {
@@ -325,12 +374,29 @@ namespace SSD_Components {
 	void copy_read_data_to_transaction(NVM_Transaction_Flash_RD* read_transaction, NVM::FlashMemory::Flash_Command* command)
 	{
 		int i = 0;
-		for (auto &address : command->Address) {
-			if (address.PlaneID == read_transaction->Address.PlaneID) {
+		int idx = 0;
+
+		for (auto& address : command->Address) {
+			if ((address.PlaneID == read_transaction->Address.PlaneID) && (address.subPageID == read_transaction->Address.subPageID)) {
 				read_transaction->LPA = command->Meta_data[i].LPA;
 			}
 			i++;
 		}
+
+
+
+
+		if (read_transaction->RelatedRead_SUB.size() != 0) {
+			for (auto& address : command->Addresses_subpgs) {
+				for (int idx_tr = 0; idx_tr < read_transaction->RelatedRead_SUB.size(); idx_tr++) {
+					if ((address.PlaneID == read_transaction->RelatedRead_SUB[idx_tr]->Address.PlaneID) && (address.BlockID == read_transaction->RelatedRead_SUB[idx_tr]->Address.BlockID) && (address.PageID == read_transaction->RelatedRead_SUB[idx_tr]->Address.PageID) && (address.subPageID == read_transaction->RelatedRead_SUB[idx_tr]->Address.subPageID)) {
+						read_transaction->RelatedRead_SUB[idx_tr]->LPA = command->Meta_datas_subpgs[idx].LPA;
+					}
+				}
+				idx++;
+			}
+		}
+
 	}
 
 	void NVM_PHY_ONFI_NVDDR2::Execute_simulator_event(MQSimEngine::Sim_Event* ev)
@@ -396,6 +462,14 @@ namespace SSD_Components {
 				//DEBUG2("Chip " << targetChip->ChannelID << ", " << targetChip->ChipID << ", " << dieBKE->ActiveTransactions.front()->Address.DieID << ": READ_DATA_TRANSFERRED ")
 				targetChip->EndDataOutXfer(dieBKE->ActiveCommand);
 				copy_read_data_to_transaction((NVM_Transaction_Flash_RD*)dieBKE->ActiveTransfer, dieBKE->ActiveCommand);
+				/*
+				printf("[DEBUG GC] LPA (pri-pg): %llu\n", (NVM_Transaction_Flash_RD*)dieBKE->ActiveTransfer->LPA);
+				if (((NVM_Transaction_Flash_RD*)dieBKE->ActiveTransfer)->RelatedRead_SUB.size() != 0) {
+					for (int idx = 0; idx < ((NVM_Transaction_Flash_RD*)dieBKE->ActiveTransfer)->RelatedRead_SUB.size(); idx++) {
+						printf("[DEBUG GC] LPA (sub-pg): %llu\n",((NVM_Transaction_Flash_RD*)dieBKE->ActiveTransfer)->RelatedRead_SUB[idx]->LPA);
+					}
+				}
+				*/
 	#if 0
 				if (tr->ExecutionMode != ExecutionModeType::COPYBACK)
 	#endif
@@ -477,6 +551,7 @@ namespace SSD_Components {
 			return;
 		} else if (WaitingGCRead_TX[channel_id].size() > 0) {
 			NVM_Transaction_Flash_RD* waitingTR = (NVM_Transaction_Flash_RD*)WaitingGCRead_TX[channel_id].front();
+			//if (waitingTR->Stream_id != 0) std::cout << "tr->stream_id is unsual" << std::endl;
 			WaitingGCRead_TX[channel_id].pop_front();
 			transfer_read_data_from_chip(&bookKeepingTable[channel_id][waitingTR->Address.ChipID],
 				&(bookKeepingTable[channel_id][waitingTR->Address.ChipID].Die_book_keeping_records[waitingTR->Address.DieID]), waitingTR);
@@ -505,8 +580,13 @@ namespace SSD_Components {
 				it != dieBKE->ActiveTransactions.end(); it++)
 			{
 				chipBKE->WaitingReadTXCount++;
-				if (_my_instance->channels[chip->ChannelID]->GetStatus() == BusChannelStatus::IDLE)
+				if (_my_instance->channels[chip->ChannelID]->GetStatus() == BusChannelStatus::IDLE) {
+					if ((*it)->Stream_id != 0) {
+						std::cout << "[DOODU_ERROR] stream_id: " << (*it)->Stream_id << std::endl;
+						exit(1);
+					}
 					_my_instance->transfer_read_data_from_chip(chipBKE, dieBKE, (*it));
+				}
 				else
 				{
 					switch (dieBKE->ActiveTransactions.front()->Source)
@@ -581,6 +661,7 @@ namespace SSD_Components {
 				((NVM_Transaction_Flash_WR*)(*it))->Content = command->Meta_data[i].LPA;
 				_my_instance->broadcastTransactionServicedSignal(*it);
 			}
+
 			dieBKE->ActiveTransactions.clear();
 			dieBKE->ClearCommand();
 

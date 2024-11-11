@@ -68,4 +68,8 @@ namespace SSD_Components
 	{
 		this->host_interface = host_interface;
 	}
+
+	void Data_Cache_Manager_Base::Set_cxl_host_interface(Host_Interface_Base* host_interface) {
+		this->cxl_host_interface = cxl_host_interface;
+	}
 }
