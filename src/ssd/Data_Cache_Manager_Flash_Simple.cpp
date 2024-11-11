@@ -61,7 +61,7 @@ namespace SSD_Components
 			switch (caching_mode_per_input_stream[user_request->Stream_id])
 			{
 				case Caching_Mode::TURNED_OFF:
-					static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(user_request->Transaction_list, user_request, NULL);
+					static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(user_request->Transaction_list);
 					return;
 				case Caching_Mode::WRITE_CACHE:
 				{
@@ -94,7 +94,7 @@ namespace SSD_Components
 						service_dram_access_request(transfer_info);
 					}
 					if (user_request->Transaction_list.size() > 0) {
-						static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(user_request->Transaction_list,user_request,NULL);
+						static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(user_request->Transaction_list);
 					}
 				}
 				default:
@@ -104,7 +104,7 @@ namespace SSD_Components
 			switch (caching_mode_per_input_stream[user_request->Stream_id])
 			{
 				case Caching_Mode::TURNED_OFF:
-					static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(user_request->Transaction_list, user_request,NULL);
+					static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(user_request->Transaction_list);
 					return;
 				case Caching_Mode::WRITE_CACHE://The data cache manger unit performs like a destage buffer
 				{
@@ -151,7 +151,7 @@ namespace SSD_Components
 					if (evicted_slot.Status == Cache_Slot_Status::DIRTY_NO_FLASH_WRITEBACK) {
 						evicted_cache_slots->push_back(new NVM_Transaction_Flash_WR(Transaction_Source_Type::CACHE,
 							tr->Stream_id, count_sector_no_from_status_bitmap(evicted_slot.State_bitmap_of_existing_sectors) * SECTOR_SIZE_IN_BYTE,
-							evicted_slot.LPA, NULL, evicted_slot.Content, evicted_slot.State_bitmap_of_existing_sectors, evicted_slot.Timestamp));
+							evicted_slot.LPA, NULL, IO_Flow_Priority_Class::URGENT, evicted_slot.Content, evicted_slot.State_bitmap_of_existing_sectors, evicted_slot.Timestamp));
 						cache_eviction_read_size_in_sectors += count_sector_no_from_status_bitmap(evicted_slot.State_bitmap_of_existing_sectors);
 						//DEBUG2("Evicting page" << evicted_slot.LPA << " from write buffer ")
 					}
@@ -195,7 +195,7 @@ namespace SSD_Components
 
 		//If any writeback should be performed, then issue flash write transactions
 		if (writeback_transactions.size() > 0) {
-			static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(writeback_transactions, user_request,NULL);
+			static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(writeback_transactions);
 		}
 
 		//Reset control data structures used for hot/cold separation 
@@ -303,7 +303,7 @@ namespace SSD_Components
 				}
 				break;
 			case Data_Cache_Simulation_Event_Type::MEMORY_READ_FOR_CACHE_EVICTION_FINISHED://Reading data from DRAM and writing it back to the flash storage
-				static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(*((std::list<NVM_Transaction*>*)(transfer_inf->Related_request)), (User_Request*)(transfer_inf)->Related_request, NULL);
+				static_cast<FTL*>(nvm_firmware)->Address_Mapping_Unit->Translate_lpa_to_ppa_and_dispatch(*((std::list<NVM_Transaction*>*)(transfer_inf->Related_request)));
 				delete (std::list<NVM_Transaction*>*)transfer_inf->Related_request;
 				break;
 			case Data_Cache_Simulation_Event_Type::MEMORY_WRITE_FOR_CACHE_FINISHED://The recently read data from flash is written back to memory to support future user read requests

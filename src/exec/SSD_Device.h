@@ -8,20 +8,16 @@
 #include "../ssd/Host_Interface_Base.h"
 #include "../ssd/Host_Interface_SATA.h"
 #include "../ssd/Host_Interface_NVMe.h"
-#include "../cxl/DRAM_Model.h"
-#include "../cxl/Host_Interface_CXL.h"
 #include "../ssd/Data_Cache_Manager_Base.h"
 #include "../ssd/Data_Cache_Flash.h"
 #include "../ssd/NVM_Firmware.h"
 #include "../ssd/NVM_PHY_Base.h"
 #include "../ssd/NVM_Channel_Base.h"
 #include "../host/PCIe_Switch.h"
-#include "../cxl/CXL_PCIe.h"
 #include "../nvm_chip/NVM_Types.h"
 #include "Device_Parameter_Set.h"
 #include "IO_Flow_Parameter_Set.h"
 #include "../utils/Workload_Statistics.h"
-
 
 /*********************************************************************************************************
 * An SSD device has the following components:
@@ -55,7 +51,6 @@ public:
 
 	unsigned int Channel_count;
 	unsigned int Chip_no_per_channel;
-	
 
 private:
 	static SSD_Device * my_instance;//Used in static functions

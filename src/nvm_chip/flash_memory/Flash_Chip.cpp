@@ -73,12 +73,7 @@ namespace NVM
 		void Flash_Chip::Change_memory_status_preconditioning(const NVM_Memory_Address* address, const void* status_info)
 		{
 			Physical_Page_Address* flash_address = (Physical_Page_Address*)address;
-#if PATCH_PRECOND
-			//Dies[flash_address->DieID]->Planes[flash_address->PlaneID]->Blocks[flash_address->BlockID]->Pages[flash_address->PageID].Metadata.LPA = *(LPA_type*)status_info;
-			Dies[flash_address->DieID]->Planes[flash_address->PlaneID]->Blocks[flash_address->BlockID]->Pages[flash_address->PageID].SubPages[flash_address->subPageID].Metadata.LPA = *(LPA_type*)status_info;
-#else
 			Dies[flash_address->DieID]->Planes[flash_address->PlaneID]->Blocks[flash_address->BlockID]->Pages[flash_address->PageID].Metadata.LPA = *(LPA_type*)status_info;
-#endif
 		}
 		
 		void Flash_Chip::Setup_triggers()
@@ -158,19 +153,9 @@ namespace NVM
 				case CMD_READ_PAGE_COPYBACK_MULTIPLANE:
 					DEBUG("Channel " << this->ChannelID << " Chip " << this->ChipID << "- Finished executing read command")
 					for (unsigned int planeCntr = 0; planeCntr < command->Address.size(); planeCntr++) {
-
 						STAT_readCount++;
 						targetDie->Planes[command->Address[planeCntr].PlaneID]->Read_count++;
-						targetDie->Planes[command->Address[planeCntr].PlaneID]->Blocks[command->Address[planeCntr].BlockID]->Pages[command->Address[planeCntr].PageID].SubPages[command->Address[planeCntr].subPageID].Read_metadata((SubPageMetadata&)command->Meta_data[planeCntr]);
-
-					}
-					for (unsigned int Cntr = 0; Cntr < command->Addresses_subpgs.size(); Cntr++) {
-
-						STAT_readCount++;
-						//std::cout << "[debug3] command (ch,chip,die,plane,block,pg,subpg): " << command->Addresses_subpgs[planeCntr].ChannelID << ", " << command->Addresses_subpgs[planeCntr].ChipID << ", " << command->Addresses_subpgs[planeCntr].DieID << ", " << command->Addresses_subpgs[planeCntr].PlaneID << ", " << command->Addresses_subpgs[planeCntr].BlockID << ", " << command->Addresses_subpgs[planeCntr].PageID << ", " << command->Addresses_subpgs[planeCntr].subPageID << std::endl;
-						targetDie->Planes[command->Addresses_subpgs[Cntr].PlaneID]->Read_count++;
-						targetDie->Planes[command->Addresses_subpgs[Cntr].PlaneID]->Blocks[command->Addresses_subpgs[Cntr].BlockID]->Pages[command->Addresses_subpgs[Cntr].PageID].SubPages[command->Addresses_subpgs[Cntr].subPageID].Read_metadata(command->Meta_datas_subpgs[Cntr]);
-
+						targetDie->Planes[command->Address[planeCntr].PlaneID]->Blocks[command->Address[planeCntr].BlockID]->Pages[command->Address[planeCntr].PageID].Read_metadata(command->Meta_data[planeCntr]);
 					}
 					break;
 				case CMD_PROGRAM_PAGE:
@@ -178,26 +163,11 @@ namespace NVM
 				case CMD_PROGRAM_PAGE_COPYBACK:
 				case CMD_PROGRAM_PAGE_COPYBACK_MULTIPLANE:
 					DEBUG("Channel " << this->ChannelID << " Chip " << this->ChipID << "- Finished executing program command")
-					
 					for (unsigned int planeCntr = 0; planeCntr < command->Address.size(); planeCntr++) {
 						STAT_progamCount++;
-						//std::cout << "[debug3] command (ch,chip,die,plane,block,pg,subpg): " << command->Address[planeCntr].ChannelID << ", " << command->Address[planeCntr].ChipID << ", " << command->Address[planeCntr].DieID << ", " << command->Address[planeCntr].PlaneID << ", " << command->Address[planeCntr].BlockID << ", " << command->Address[planeCntr].PageID << ", " << command->Address[planeCntr].subPageID << std::endl;
-
 						targetDie->Planes[command->Address[planeCntr].PlaneID]->Progam_count++;
-						targetDie->Planes[command->Address[planeCntr].PlaneID]->Blocks[command->Address[planeCntr].BlockID]->Pages[command->Address[planeCntr].PageID].SubPages[command->Address[planeCntr].subPageID].Write_metadata((SubPageMetadata&)(command->Meta_data[planeCntr]));
+						targetDie->Planes[command->Address[planeCntr].PlaneID]->Blocks[command->Address[planeCntr].BlockID]->Pages[command->Address[planeCntr].PageID].Write_metadata(command->Meta_data[planeCntr]);
 					}
-										
-					
-					for (unsigned int Cntr = 0; Cntr < command->Addresses_subpgs.size(); Cntr++) {
-						STAT_progamCount++;
-						//std::cout << "[debug3] command (ch,chip,die,plane,block,pg,subpg): " << command->Addresses_subpgs[Cntr].ChannelID << ", " << command->Addresses_subpgs[Cntr].ChipID << ", " << command->Addresses_subpgs[Cntr].DieID << ", " << command->Addresses_subpgs[Cntr].PlaneID << ", " << command->Addresses_subpgs[Cntr].BlockID << ", " << command->Addresses_subpgs[Cntr].PageID << ", " << command->Addresses_subpgs[Cntr].subPageID << std::endl;
-
-						
-						targetDie->Planes[command->Addresses_subpgs[Cntr].PlaneID]->Progam_count++;
-						targetDie->Planes[command->Addresses_subpgs[Cntr].PlaneID]->Blocks[command->Addresses_subpgs[Cntr].BlockID]->Pages[command->Addresses_subpgs[Cntr].PageID].SubPages[command->Addresses_subpgs[Cntr].subPageID].Write_metadata(command->Meta_datas_subpgs[Cntr]);
-					}
-
-					
 					break;
 				case CMD_ERASE_BLOCK:
 				case CMD_ERASE_BLOCK_MULTIPLANE:

@@ -2,7 +2,6 @@
 #define PAGE_H
 
 #include "FlashTypes.h"
-#include "SubPage.h"
 
 namespace NVM
 {
@@ -19,17 +18,11 @@ namespace NVM
 		public:
 			Page()
 			{
-
 				//Metadata.Status = FREE_PAGE;
 				Metadata.LPA = NO_LPA;
 				//Metadata.SourceStreamID = NO_STREAM;
-
-				SubPages = new SubPage[ALIGN_UNIT_SIZE];
-
 			};
-
-			SubPage* SubPages;
-		
+			
 			PageMetadata Metadata;
 
 			void Write_metadata(const PageMetadata& metadata)

@@ -5,7 +5,6 @@
 #include "FlashTypes.h"
 #include "Physical_Page_Address.h"
 #include "Page.h"
-#include "SubPage.h"
 
 
 #define CMD_READ 0x0030
@@ -37,13 +36,7 @@ namespace NVM
 		public:
 			command_code_type CommandCode;
 			std::vector<Physical_Page_Address> Address;
-			//std::vector<SubPageMetadata> Meta_data;
 			std::vector<PageMetadata> Meta_data;
-
-
-			std::vector<Physical_Page_Address> Addresses_subpgs;
-			std::vector<SubPageMetadata> Meta_datas_subpgs;
-
 		};
 	}
 }

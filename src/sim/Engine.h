@@ -7,8 +7,6 @@
 #include "EventTree.h"
 #include "Sim_Object.h"
 
-
-
 namespace MQSimEngine {
 	class Engine
 	{
@@ -36,8 +34,6 @@ namespace MQSimEngine {
 		void Stop_simulation();
 		bool Has_started();
 		bool Is_integrated_execution_mode();
-		sim_time_type sim_time_before_PRECOND;
-		sim_time_type sim_time_before_GC;
 	private:
 		sim_time_type _sim_time;
 		EventTree* _EventList;

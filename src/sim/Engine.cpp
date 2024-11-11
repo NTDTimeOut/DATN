@@ -80,7 +80,6 @@ namespace MQSimEngine
 		Sim_Event* ev = NULL;
 		while (true) {
 			if (_EventList->Count == 0 || stop) {
-				//std::cout << " check" << std::endl;
 				break;
 			}
 

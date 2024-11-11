@@ -17,14 +17,14 @@ namespace SSD_Components
 		unsigned int channel_no, unsigned int chip_no_per_channel, unsigned int die_no_per_chip, unsigned int plane_no_per_die,
 		unsigned int block_no_per_plane, unsigned int page_no_per_block, unsigned int page_size_in_sectors, 
 		sim_time_type avg_flash_read_latency, sim_time_type avg_flash_program_latency, 
-		double over_provisioning_ratio, unsigned int max_allowed_block_erase_count, int seed, unsigned int info) :
+		double over_provisioning_ratio, unsigned int max_allowed_block_erase_count, int seed) :
 		NVM_Firmware(id, data_cache_manager), random_generator(seed),
 		channel_no(channel_no), chip_no_per_channel(chip_no_per_channel), die_no_per_chip(die_no_per_chip), plane_no_per_die(plane_no_per_die),
 		block_no_per_plane(block_no_per_plane), page_no_per_block(page_no_per_block), page_size_in_sectors(page_size_in_sectors), 
 		avg_flash_read_latency(avg_flash_read_latency), avg_flash_program_latency(avg_flash_program_latency),
 		over_provisioning_ratio(over_provisioning_ratio), max_allowed_block_erase_count(max_allowed_block_erase_count)
 	{
-		Stats::Init_stats(channel_no, chip_no_per_channel, die_no_per_chip, plane_no_per_die, block_no_per_plane, page_no_per_block, max_allowed_block_erase_count, info);
+		Stats::Init_stats(channel_no, chip_no_per_channel, die_no_per_chip, plane_no_per_die, block_no_per_plane, page_no_per_block, max_allowed_block_erase_count);
 	}
 
 	FTL::~FTL()
@@ -79,13 +79,8 @@ namespace SSD_Components
 
 		for (auto &stat : workload_stats)
 		{
-#if PATCH_PRECOND
 			LPA_type no_of_logical_pages_in_steadystate = (LPA_type)(stat->Initial_occupancy_ratio * Address_Mapping_Unit->Get_logical_pages_count(stat->Stream_id));
-			std::cout << "[DEBUG PRECOND] no_of_logical_pages_in_steadystate: " << no_of_logical_pages_in_steadystate << std::endl;
-#else
-			LPA_type no_of_logical_pages_in_steadystate = (LPA_type)(stat->Initial_occupancy_ratio * Address_Mapping_Unit->Get_logical_pages_count(stat->Stream_id));
-			std::cout << "[DEBUG PRECOND] no_of_logical_pages_in_steadystate: " << no_of_logical_pages_in_steadystate << std::endl;
-#endif
+
 			//Step 1: generate LPAs that are accessed in the steady-state
 			Utils::Address_Distribution_Type decision_dist_type = stat->Address_distribution_type;
 			std::map<LPA_type, page_status_type> lpa_set_for_preconditioning;//Stores the accessed LPAs
@@ -103,11 +98,7 @@ namespace SSD_Components
 			}
 
 			LPA_type max_lpa = Convert_host_logical_address_to_device_address(max_lha) - 1;
-#if PATCH_PRECOND
-			total_accessed_cmt_entries += (unsigned int)(Convert_host_logical_address_to_device_address(max_lha) / (page_size_in_sectors / ALIGN_UNIT_SIZE) - Convert_host_logical_address_to_device_address(min_lha) / (page_size_in_sectors / ALIGN_UNIT_SIZE)) + 1;
-#else
 			total_accessed_cmt_entries += (unsigned int)(Convert_host_logical_address_to_device_address(max_lha) / page_size_in_sectors - Convert_host_logical_address_to_device_address(min_lha) / page_size_in_sectors) + 1;
-#endif
 			bool hot_range_finished = false;//Used for fast address generation in hot/cold traffic mode
 			LHA_type hot_region_end_lsa = 0, hot_lha_used_for_generation = 0;//Used for fast address generation in hot/cold traffic mode
 			LPA_type last_hot_lpa = 0;
@@ -143,7 +134,7 @@ namespace SSD_Components
 					//Check if enough LPAs could be generated within the working set of the flow
 					if ((last_hot_lpa - min_lpa) < no_of_logical_pages_in_steadystate)
 						fully_include_hot_addresses = true;
-					if ((max_lpa - last_hot_lpa) < 1.01 * (no_of_logical_pages_in_steadystate - (last_hot_lpa - min_lpa)))
+					if ((max_lpa - last_hot_lpa) < 1.1 * (no_of_logical_pages_in_steadystate - (last_hot_lpa - min_lpa)))
 					{
 						PRINT_MESSAGE("The specified initial occupancy value could not be satisfied as the working set of workload #" << stat->Stream_id << " is small. MQSim made some adjustments!");
 						max_lha = min_lha + LHA_type(double(max_lha - min_lha) / stat->Working_set_ratio);
@@ -152,11 +143,6 @@ namespace SSD_Components
 								max_lha -= min_lha % stat->alignment_value;
 						
 						max_lpa = Convert_host_logical_address_to_device_address(max_lha);
-
-						if ((max_lpa - min_lpa) < 1.01 * no_of_logical_pages_in_steadystate)
-						{
-							no_of_logical_pages_in_steadystate = (unsigned int)(double(max_lpa - min_lpa) * 0.999);
-						}						
 					}
 					break;
 				}
@@ -172,7 +158,7 @@ namespace SSD_Components
 						if (stat->generate_aligned_addresses)
 							if (max_lha % stat->alignment_value != 0)
 								max_lha -= min_lha % stat->alignment_value;
-						max_lpa = Convert_host_logical_address_to_device_address(max_lha)-1;
+						max_lpa = Convert_host_logical_address_to_device_address(max_lha);
 
 						if ((max_lpa - min_lpa) < no_of_logical_pages_in_steadystate)
 							no_of_logical_pages_in_steadystate = max_lpa - min_lpa + 1;
@@ -182,13 +168,7 @@ namespace SSD_Components
 				case Utils::Address_Distribution_Type::RANDOM_UNIFORM:
 				{
 					//Check if enough LPAs could be generated within the working set of the flow
-//					if ((max_lpa - min_lpa) < 1.1 * no_of_logical_pages_in_steadystate)
-#if PATCH_PRECOND
-					//if ((max_lpa - min_lpa) * ALIGN_UNIT_SIZE < 1.01 * no_of_logical_pages_in_steadystate) //doodu flag0307. this goes to infinite loop
-					if ((max_lpa - min_lpa) < 1.01 * no_of_logical_pages_in_steadystate)
-#else
-					if ((max_lpa - min_lpa) < 1.01 * no_of_logical_pages_in_steadystate)
-#endif
+					if ((max_lpa - min_lpa) < 1.1 * no_of_logical_pages_in_steadystate)
 					{
 						PRINT_MESSAGE("The specified initial occupancy value could not be satisfied as the working set of workload #" << stat->Stream_id << " is small. MQSim made some adjustments!");
 						max_lha = min_lha + LHA_type(double(max_lha - min_lha) / stat->Working_set_ratio);
@@ -197,10 +177,9 @@ namespace SSD_Components
 								max_lha -= min_lha % stat->alignment_value;
 						max_lpa = Convert_host_logical_address_to_device_address(max_lha);
 
-						if ((max_lpa - min_lpa) < 1.01 * no_of_logical_pages_in_steadystate)
+						if ((max_lpa - min_lpa) < 1.1 * no_of_logical_pages_in_steadystate)
 						{
-							no_of_logical_pages_in_steadystate = (unsigned int)(double(max_lpa - min_lpa) * 0.999);
-							PRINT_MESSAGE(no_of_logical_pages_in_steadystate);
+							no_of_logical_pages_in_steadystate = (unsigned int)(double(max_lpa - min_lpa) * 0.9);
 						}
 					}
 					break;
@@ -238,11 +217,8 @@ namespace SSD_Components
 					{
 					case Utils::Address_Distribution_Type::STREAMING:
 						start_LBA = streaming_next_address;
-						if (start_LBA + size > max_lha){
-							PRINT_MESSAGE(start_LBA + size << " LPN " << (start_LBA + size) / 16 << " new " << min_lha);
+						if (start_LBA + size > max_lha)
 							start_LBA = min_lha;
-							
-						}
 						streaming_next_address += size;
 						if (streaming_next_address > max_lha)
 							streaming_next_address = min_lha;
@@ -306,29 +282,23 @@ namespace SSD_Components
 						start_LBA -= start_LBA % stat->alignment_value;
 
 
-					unsigned int hanled_sectors_count = 0;
+					unsigned int handled_sectors_count = 0;
 					LHA_type lsa = start_LBA - min_lha;
 					unsigned int transaction_size = 0;
 					page_status_type access_status_bitmap = 0;
 					LPA_type max_lpa_within_device = Convert_host_logical_address_to_device_address(stat->Max_LHA) - Convert_host_logical_address_to_device_address(stat->Min_LHA);
-					while (hanled_sectors_count < size)
+					while (handled_sectors_count < size)
 					{
-
-#if PATCH_PRECOND
-						transaction_size = (page_size_in_sectors / ALIGN_UNIT_SIZE) - (unsigned int)(lsa % (page_size_in_sectors / ALIGN_UNIT_SIZE));
-						//transaction_size = page_size_in_sectors - (unsigned int)(lsa % page_size_in_sectors);
-#else
 						transaction_size = page_size_in_sectors - (unsigned int)(lsa % page_size_in_sectors);
-#endif
-						if (hanled_sectors_count + transaction_size >= size)
+						if (handled_sectors_count + transaction_size >= size)
 						{
-							transaction_size = size - hanled_sectors_count;
+							transaction_size = size - handled_sectors_count;
 						}
 						LPA_type lpa = Convert_host_logical_address_to_device_address(lsa);
 						page_status_type access_status_bitmap = Find_NVM_subunit_access_bitmap(lsa);
 
 						lsa = lsa + transaction_size;
-						hanled_sectors_count += transaction_size;
+						handled_sectors_count += transaction_size;
 
 						if (lpa_set_for_preconditioning.find(lpa) == lpa_set_for_preconditioning.end()) {
 							lpa_set_for_preconditioning[lpa] = access_status_bitmap;
@@ -345,8 +315,7 @@ namespace SSD_Components
 						}
 					}
 				}
-			} //sythentic workload end
-			 else {
+			} else {
 				//Step 1-1: Read LPAs are preferred for steady-state since each read should be written before the actual access
 				for (auto itr = stat->Write_read_shared_addresses.begin(); itr != stat->Write_read_shared_addresses.end(); itr++) {
 					LPA_type lpa = (*itr);
@@ -430,18 +399,18 @@ namespace SSD_Components
 				//Step 1-4: If both read and write LPAs are not enough for preconditioning flash storage space, then fill the remaining space
 				while (lpa_set_for_preconditioning.size() < no_of_logical_pages_in_steadystate) {
 					start_LHA = random_address_generator->Uniform_ulong(min_lha, max_lha);
-					unsigned int hanled_sectors_count = 0;
+					unsigned int handled_sectors_count = 0;
 					LHA_type lsa = start_LHA;
 					unsigned int transaction_size = 0;
-					while (hanled_sectors_count < size) {
+					while (handled_sectors_count < size) {
 						if (lsa < min_lha || lsa > max_lha) {
 							lsa = min_lha + (lsa % (max_lha - min_lha + 1));
 						}
 						LHA_type internal_lsa = lsa - min_lha;
 
 						transaction_size = page_size_in_sectors - (unsigned int)(internal_lsa % page_size_in_sectors);
-						if (hanled_sectors_count + transaction_size >= size) {
-							transaction_size = size - hanled_sectors_count;
+						if (handled_sectors_count + transaction_size >= size) {
+							transaction_size = size - handled_sectors_count;
 						}
 
 						LPA_type lpa = Convert_host_logical_address_to_device_address(internal_lsa);
@@ -454,7 +423,7 @@ namespace SSD_Components
 						}
 
 						lsa = lsa + transaction_size;
-						hanled_sectors_count += transaction_size;
+						handled_sectors_count += transaction_size;
 					}
 				}
 			}//else of if (stat->Type == Utils::Workload_Type::SYNTHETIC)
@@ -463,8 +432,6 @@ namespace SSD_Components
 			//Note: if hot/cold separation is required, then the following estimations should be changed according to Van Houtd's paper in Performance Evaluation 2014.
 			std::vector<double> steadystate_block_status_probability;//The probability distribution function of the number of valid pages in a block in the steadystate
 			double rho = stat->Initial_occupancy_ratio * (1 - over_provisioning_ratio) / (1 - double(GC_and_WL_Unit->Get_minimum_number_of_free_pages_before_GC()) / block_no_per_plane);
-			decision_dist_type = stat->Address_distribution_type;
-			
 			switch (decision_dist_type) {
 			case Utils::Address_Distribution_Type::RANDOM_HOTCOLD://Estimate the steady-state of the hot/cold traffic based on the steady-state of the uniform traffic
 			{
@@ -587,28 +554,10 @@ namespace SSD_Components
 					case GC_Block_Selection_Policy_Type::GREEDY://Based on: B. Van Houdt, "A mean field model for a class of garbage collection algorithms in flash-based solid state drives", SIGMETRICS 2013.
 					case GC_Block_Selection_Policy_Type::FIFO://Could be estimated with greedy for large page_no_per_block values, as mentioned in //Based on: B. Van Houdt, "A mean field model for a class of garbage collection algorithms in flash-based solid state drives", SIGMETRICS 2013.
 					{
-
-#if PATCH_PRECOND
-
-						for (unsigned int i = 0; i <= (page_no_per_block * ALIGN_UNIT_SIZE); i++) {
-							//std::cout << "[DEBUG PRECOND] Combination count: "<<Utils::Combination_count(page_no_per_block, i) * std::pow(rho, i) * std::pow(1 - rho, page_no_per_block - i) << std::endl;
-							steadystate_block_status_probability.push_back(Utils::Combination_count(page_no_per_block, i) * std::pow(rho, i) * std::pow(1 - rho, (page_no_per_block)-i));
-						}
-						Utils::Euler_estimation(steadystate_block_status_probability, page_no_per_block, rho, 30, 0.001, 0.0000000001, 10000);//As specified in the SIGMETRICS 2013 paper, a larger value for d-choices (the name of RGA in Van Houdt's paper) will lead to results close to greedy. We use d=30 to estimate steady-state of the greedy policy with that of d-chioces.
-
-						/*
 						for (unsigned int i = 0; i <= page_no_per_block; i++) {
 							steadystate_block_status_probability.push_back(Utils::Combination_count(page_no_per_block, i) * std::pow(rho, i) * std::pow(1 - rho, page_no_per_block - i));
 						}
 						Utils::Euler_estimation(steadystate_block_status_probability, page_no_per_block, rho, 30, 0.001, 0.0000000001, 10000);//As specified in the SIGMETRICS 2013 paper, a larger value for d-choices (the name of RGA in Van Houdt's paper) will lead to results close to greedy. We use d=30 to estimate steady-state of the greedy policy with that of d-chioces.
-						*/
-#else
-						for (unsigned int i = 0; i <= page_no_per_block; i++) {
-							steadystate_block_status_probability.push_back(Utils::Combination_count(page_no_per_block, i) * std::pow(rho, i) * std::pow(1 - rho, page_no_per_block - i));
-							std::cout << "[DEBUG PRECOND] Combination count: " << Utils::Combination_count(page_no_per_block * ALIGN_UNIT_SIZE, i) * std::pow(rho, i) * std::pow(1 - rho, page_no_per_block * ALIGN_UNIT_SIZE - i) << std::endl;
-						}
-						Utils::Euler_estimation(steadystate_block_status_probability, page_no_per_block, rho, 30, 0.001, 0.0000000001, 10000);//As specified in the SIGMETRICS 2013 paper, a larger value for d-choices (the name of RGA in Van Houdt's paper) will lead to results close to greedy. We use d=30 to estimate steady-state of the greedy policy with that of d-chioces.
-#endif
 						break;
 					}
 					case GC_Block_Selection_Policy_Type::RGA://Based on: B. Van Houdt, "A mean field model for a class of garbage collection algorithms in flash-based solid state drives", SIGMETRICS 2013.
@@ -674,28 +623,14 @@ namespace SSD_Components
 			double sum = 0;
 
 			//Check if probability distribution is correct
-
-#if PATCH_PRECOND
-
-			for (unsigned int i = 0; i <= page_no_per_block * ALIGN_UNIT_SIZE; i++) {
-				//std::cout << "sum: " << sum <<", steadystate_block_status_probability[i]: "<<steadystate_block_status_probability[i]<< std::endl;
-				sum += steadystate_block_status_probability[i];
-			}
-			//std::cout << "[DEBUG PRECOND] sum of steadystate_block_status_probability[]: " << sum << std::endl;
-
-#else
 			for (unsigned int i = 0; i <= page_no_per_block; i++) {
-				std::cout << "sum: " << sum << std::endl;
 				sum += steadystate_block_status_probability[i];
 			}
-			std::cout << "[DEBUG PRECOND] sum of = steadystate_block_status_probability[]: " << sum << std::endl;
-#endif
 
 			//Due to some precision errors the sum may not be exactly equal to 1
 			if (sum > 1.001 || sum < 0.99) {
 				PRINT_ERROR("Wrong probability distribution function for the number of valid pages in flash blocks in the steady-state! It is not safe to continue preconditioning!")
 			}
-
 			Address_Mapping_Unit->Allocate_address_for_preconditioning(stat->Stream_id, lpa_set_for_preconditioning, steadystate_block_status_probability);
 
 			//Step 4: Touch the LPAs and bring them to CMT to warmup address mapping unit
@@ -951,105 +886,6 @@ namespace SSD_Components
 		xmlwriter.Write_attribute_string_inline(attr, val);
 
 		xmlwriter.Write_end_element_tag();
-
-		// addtional information for gearup.		
-		tmp = name_prefix + ".GearUp";
-		xmlwriter.Write_start_element_tag(tmp);
-
-		attr = "Utilization";
-		val = std::to_string(Stats::Utilization);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Host_write";
-		val = std::to_string(Stats::Host_write_count);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Host_write_subpgs";
-		val = std::to_string(Stats::Host_write_count_subpgs);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Physical_write";
-		val = std::to_string(Stats::Physical_write_count);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Physical_write_count_subpg";
-		val = std::to_string(Stats::Physical_write_count_subpg);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Relief_write";
-		val = std::to_string(Stats::Relief_page_count);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Relief_proportion";
-		val = std::to_string(Stats::Relief_proportion);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Total_WAF";
-		val = std::to_string((double)Stats::Physical_write_count/Stats::Host_write_count);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Total_WAF_subpgs";
-		val = std::to_string((double)Stats::Physical_write_count_subpg / Stats::Host_write_count_subpgs);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Additional_WAF_by_mapping";
-		val = std::to_string(Stats::Additional_WAF_by_mapping);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		unsigned int index;
-		attr = "WAI";
-		xmlwriter.Write_attribute(attr);
-		for (index = 0; index < Stats::WAF_index; index++){	
-			val = std::to_string(Stats::WAI[index]);
-			xmlwriter.Write_string(val);
-		}
-
-		attr = "WAF";
-		xmlwriter.Write_attribute(attr);
-		for (index = 0; index < Stats::WAF_index; index++){	
-			val = std::to_string(Stats::WAF[index]);
-			xmlwriter.Write_string(val);
-		}
-		
-		attr = "Max_consecutive_gc_write";
-		val = std::to_string(Stats::Max_consecutive_gc_write);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Relief_type";
-		val = std::to_string(Stats::Relief_type);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Relief_ratio";
-		val = std::to_string((double)Stats::Relief_page_count/Stats::Physical_write_count);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Reliefed_Space";
-		xmlwriter.Write_attribute(attr);
-		for (index = 0; index < Stats::WAF_index; index++){	
-			val = std::to_string(Stats::Reliefed[index]);
-			xmlwriter.Write_string(val);
-		}
-
-		attr = "Relief_Histogram";
-		xmlwriter.Write_attribute(attr);
-		for (index = 0; index <= Stats::Max_relief_count; index++){	
-			val = std::to_string(Stats::Relief_histogram[index]);
-			xmlwriter.Write_string(val);
-		}
-
-		attr = "Relief_freq";
-		val = std::to_string((double)Stats::Relief_count/Stats::Erase_count);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Relief_count";
-		val = std::to_string(Stats::Relief_count);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		attr = "Erase_count";
-		val = std::to_string(Stats::Erase_count);
-		xmlwriter.Write_attribute_string_inline(attr, val);
-
-		xmlwriter.Write_end_element_tag();
 	}
 
 	void FTL::Start_simulation()
@@ -1062,22 +898,11 @@ namespace SSD_Components
 
 	LPA_type FTL::Convert_host_logical_address_to_device_address(LHA_type lha)
 	{
-#if PATCH_PRECOND
-		//return lha / (page_size_in_sectors/ALIGN_UNIT_SIZE);
-		return lha / (page_size_in_sectors / ALIGN_UNIT_SIZE); /// ALIGN_UNIT_SIZE;
-#else
 		return lha / page_size_in_sectors;
-#endif
 	}
 
 	page_status_type FTL::Find_NVM_subunit_access_bitmap(LHA_type lha)
 	{
-#if PATCH_PRECOND
-		//check access_status_bitmap assignment in 'segment_user_request()' [DOODU]
-		//std::cout << "[DEBUG PRECOND] lha: " << lha << std::endl;
-		return ((page_status_type)~(0xffffffffffffffff << (int)1)) << (int)(lha % (page_size_in_sectors / ALIGN_UNIT_SIZE));
-#else
 		return ((page_status_type)~(0xffffffffffffffff << (int)1)) << (int)(lha % page_size_in_sectors);
-#endif
 	}
 }

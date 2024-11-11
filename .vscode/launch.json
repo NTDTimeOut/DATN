@@ -8,8 +8,8 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": true,
-      "cwd": "d:/DATN/MQSim_CXL_Linux/src/ssd",
-      "program": "d:/DATN/MQSim_CXL_Linux/src/ssd/build/Debug/outDebug",
+      "cwd": "d:/DATN/MQSim/src/exec",
+      "program": "d:/DATN/MQSim/src/exec/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [
