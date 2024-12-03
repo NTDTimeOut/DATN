@@ -2,6 +2,7 @@
 #include "Host_System.h"
 #include "../ssd/Host_Interface_Base.h"
 #include "../ssd/Host_Interface_NVMe.h"
+#include "../cxl/Host_Interface_CXL.h"
 #include "../host/PCIe_Root_Complex.h"
 #include "../host/IO_Flow_Synthetic.h"
 #include "../host/IO_Flow_Trace_Based.h"
@@ -14,17 +15,33 @@ Host_System::Host_System(Host_Parameter_Set* parameters, bool preconditioning_re
 	Simulator->AddObject(this);
 
 	//Create the main components of the host system
-	if (((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->GetType() == HostInterface_Types::SATA) {
+	//if (((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->GetType() == HostInterface_Types::SATA) {
+	//	this->SATA_hba = new Host_Components::SATA_HBA(ID() + ".SATA_HBA", ((SSD_Components::Host_Interface_SATA*)ssd_host_interface)->Get_ncq_depth(), parameters->SATA_Processing_Delay, NULL, NULL);
+	//} else {
+	//	this->SATA_hba = NULL;
+	//}
+
+	if (((SSD_Components::Host_Interface_CXL*)ssd_host_interface)->GetType() == HostInterface_Types::SATA) {
 		this->SATA_hba = new Host_Components::SATA_HBA(ID() + ".SATA_HBA", ((SSD_Components::Host_Interface_SATA*)ssd_host_interface)->Get_ncq_depth(), parameters->SATA_Processing_Delay, NULL, NULL);
-	} else {
+	}
+	else {
 		this->SATA_hba = NULL;
 	}
+
+
 	this->Link = new Host_Components::PCIe_Link(this->ID() + ".PCIeLink", NULL, NULL, parameters->PCIe_Lane_Bandwidth, parameters->PCIe_Lane_Count);
 	this->PCIe_root_complex = new Host_Components::PCIe_Root_Complex(this->Link, ssd_host_interface->GetType(), this->SATA_hba, NULL);
 	this->Link->Set_root_complex(this->PCIe_root_complex);
 	this->PCIe_switch = new Host_Components::PCIe_Switch(this->Link, ssd_host_interface);
 	this->Link->Set_pcie_switch(this->PCIe_switch);
 	Simulator->AddObject(this->Link);
+
+	this->cxl_pcie = new Host_Components::CXL_PCIe("CXL_PCIe");
+	this->cxl_pcie->Set_pcie_switch(this->PCIe_switch);
+	Simulator->AddObject(this->cxl_pcie);
+
+	this->PCIe_switch->cxl_pcie = this->cxl_pcie;
+
 
 	//Create IO flows
 	LHA_type address_range_per_flow = ssd_host_interface->Get_max_logical_sector_address() / parameters->IO_Flow_Definitions.size();
@@ -33,13 +50,23 @@ Host_System::Host_System(Host_Parameter_Set* parameters, bool preconditioning_re
 		//No flow should ask for I/O queue id 0, it is reserved for NVMe Admin command queue pair
 		//Hence, we use flow_id + 1 (which is equal to 1, 2, ...) as the requested I/O queue id
 		uint16_t nvme_sq_size = 0, nvme_cq_size = 0;
-		switch (((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->GetType()) {
-			case HostInterface_Types::NVME:
-				nvme_sq_size = ((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->Get_submission_queue_depth();
-				nvme_cq_size = ((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->Get_completion_queue_depth();
-				break;
-			default:
-				break;
+
+		//switch (((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->GetType()) {
+		//	case HostInterface_Types::NVME:
+		//		nvme_sq_size = ((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->Get_submission_queue_depth();
+		//		nvme_cq_size = ((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->Get_completion_queue_depth();
+		//		break;
+		//	default:
+		//		break;
+		//}
+
+		switch (((SSD_Components::Host_Interface_CXL*)ssd_host_interface)->GetType()) {
+		case HostInterface_Types::NVME:
+			nvme_sq_size = ((SSD_Components::Host_Interface_CXL*)ssd_host_interface)->Get_submission_queue_depth();
+			nvme_cq_size = ((SSD_Components::Host_Interface_CXL*)ssd_host_interface)->Get_completion_queue_depth();
+			break;
+		default:
+			break;
 		}
 
 		switch (parameters->IO_Flow_Definitions[flow_id]->Type) {
@@ -62,6 +89,8 @@ Host_System::Host_System(Host_Parameter_Set* parameters, bool preconditioning_re
 				break;
 			}
 			case Flow_Type::TRACE: {
+
+
 				IO_Flow_Parameter_Set_Trace_Based * flow_param = (IO_Flow_Parameter_Set_Trace_Based*)parameters->IO_Flow_Definitions[flow_id];
 				io_flow = new Host_Components::IO_Flow_Trace_Based(this->ID() + ".IO_Flow.Trace." + flow_param->File_Path, flow_id,
 					Utils::Logical_Address_Partitioning_Unit::Start_lha_available_to_flow(flow_id), Utils::Logical_Address_Partitioning_Unit::End_lha_available_to_flow(flow_id),
@@ -69,18 +98,28 @@ Host_System::Host_System(Host_Parameter_Set* parameters, bool preconditioning_re
 					flow_param->Priority_Class, flow_param->Initial_Occupancy_Percentage / double(100.0),
 					flow_param->File_Path, flow_param->Time_Unit, flow_param->Relay_Count, flow_param->Percentage_To_Be_Executed,
 					ssd_host_interface->GetType(), this->PCIe_root_complex, this->SATA_hba,
-					parameters->Enable_ResponseTime_Logging, parameters->ResponseTime_Logging_Period_Length, parameters->Input_file_path + ".IO_Flow.No_" + std::to_string(flow_id) + ".log");
+					parameters->Enable_ResponseTime_Logging, parameters->ResponseTime_Logging_Period_Length, parameters->Input_file_path + ".IO_Flow.No_" + std::to_string(flow_id) + ".log", this->cxl_pcie);
 
 				this->IO_flows.push_back(io_flow);
+				this->cxl_pcie->Set_io_flow(io_flow);
 				break;
 			}
 			default:
 				throw "The specified IO flow type is not supported.\n";
 		}
 		Simulator->AddObject(io_flow);
+		
 	}
+
+	
+
 	this->PCIe_root_complex->Set_io_flows(&this->IO_flows);
-	if (((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->GetType() == HostInterface_Types::SATA) {
+	//if (((SSD_Components::Host_Interface_NVMe*)ssd_host_interface)->GetType() == HostInterface_Types::SATA) {
+	//	this->SATA_hba->Set_io_flows(&this->IO_flows);
+	//	this->SATA_hba->Set_root_complex(this->PCIe_root_complex);
+	//}
+
+	if (((SSD_Components::Host_Interface_CXL*)ssd_host_interface)->GetType() == HostInterface_Types::SATA) {
 		this->SATA_hba->Set_io_flows(&this->IO_flows);
 		this->SATA_hba->Set_root_complex(this->PCIe_root_complex);
 	}
@@ -115,8 +154,15 @@ void Host_System::Start_simulation()
 {
 	switch (ssd_device->Host_interface->GetType()) {
 		case HostInterface_Types::NVME:
+			//for (uint16_t flow_cntr = 0; flow_cntr < IO_flows.size(); flow_cntr++) {
+			//	((SSD_Components::Host_Interface_NVMe*) ssd_device->Host_interface)->Create_new_stream(
+			//		IO_flows[flow_cntr]->Priority_class(),
+			//		IO_flows[flow_cntr]->Get_start_lsa_on_device(), IO_flows[flow_cntr]->Get_end_lsa_address_on_device(),
+			//		IO_flows[flow_cntr]->Get_nvme_queue_pair_info()->Submission_queue_memory_base_address, IO_flows[flow_cntr]->Get_nvme_queue_pair_info()->Completion_queue_memory_base_address);
+			//}
+
 			for (uint16_t flow_cntr = 0; flow_cntr < IO_flows.size(); flow_cntr++) {
-				((SSD_Components::Host_Interface_NVMe*) ssd_device->Host_interface)->Create_new_stream(
+				((SSD_Components::Host_Interface_CXL*)ssd_device->Host_interface)->Create_new_stream(
 					IO_flows[flow_cntr]->Priority_class(),
 					IO_flows[flow_cntr]->Get_start_lsa_on_device(), IO_flows[flow_cntr]->Get_end_lsa_address_on_device(),
 					IO_flows[flow_cntr]->Get_nvme_queue_pair_info()->Submission_queue_memory_base_address, IO_flows[flow_cntr]->Get_nvme_queue_pair_info()->Completion_queue_memory_base_address);

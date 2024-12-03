@@ -21,14 +21,13 @@ namespace SSD_Components
 			page_status_type read_sectors_bitmap, data_timestamp_type data_timestamp);
 		NVM_Transaction_Flash_RD(Transaction_Source_Type source, stream_id_type stream_id,
 			unsigned int data_size_in_byte, LPA_type lpa, PPA_type ppa,
-			SSD_Components::User_Request* related_user_IO_request, IO_Flow_Priority_Class::Priority priority_class, NVM::memory_content_type content,
-			page_status_type read_sectors_bitmap, data_timestamp_type data_timestamp);
-		NVM_Transaction_Flash_RD(Transaction_Source_Type source, stream_id_type stream_id,
-			unsigned int data_size_in_byte, LPA_type lpa, PPA_type ppa,
 			SSD_Components::User_Request* related_user_IO_request, NVM::memory_content_type content,
 			page_status_type read_sectors_bitmap, data_timestamp_type data_timestamp);
 		NVM::memory_content_type Content; //The content of this transaction
 		NVM_Transaction_Flash_WR* RelatedWrite;		//Is this read request related to another write request and provides update data (for partial page write)
+
+		std::vector <NVM_Transaction_Flash_RD*> RelatedRead_SUB; //sub-page trs. 
+
 		page_status_type read_sectors_bitmap;
 		data_timestamp_type DataTimeStamp;
 	};

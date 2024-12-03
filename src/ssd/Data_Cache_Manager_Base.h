@@ -36,10 +36,12 @@ namespace SSD_Components
 		typedef void(*MemoryTransactionServicedSignalHanderType) (NVM_Transaction*);
 		void Connect_to_user_memory_transaction_serviced_signal(MemoryTransactionServicedSignalHanderType);
 		void Set_host_interface(Host_Interface_Base* host_interface);
+		void Set_cxl_host_interface(Host_Interface_Base* host_interface);
 		virtual void Do_warmup(std::vector<Utils::Workload_Statistics*> workload_stats) = 0;
 	protected:
 		static Data_Cache_Manager_Base* _my_instance;
 		Host_Interface_Base* host_interface;
+		Host_Interface_Base* cxl_host_interface;
 		NVM_Firmware* nvm_firmware;
 		unsigned int dram_row_size;//The size of the DRAM rows in bytes
 		unsigned int dram_data_rate;//in MT/s
