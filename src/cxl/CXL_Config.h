@@ -12,6 +12,7 @@ typedef enum class cachepolicy {
 	lfu,
 	lru,
 	cflru,
+	lac,
 	lrfu,//not working
 	cpu//no need of it
 }cachepolicy;
