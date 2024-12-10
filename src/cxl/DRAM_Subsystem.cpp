@@ -260,6 +260,13 @@ namespace SSD_Components {
 			}
 			delete all_cflrucachedlba;
 		}
+
+		if (all_laccachedlba) {
+			for (auto i : *all_laccachedlba) {
+				delete i;
+			}
+			delete all_laccachedlba;
+		}
 		//if (freeCL) {
 		//	freeCL->clear();
 		//	delete freeCL;
@@ -335,9 +342,14 @@ namespace SSD_Components {
 		else if (cpara.cpolicy == cachepolicy::lfu) {
 			all_lfucachedlba = new vector<lfuHeap*>;
 		}
+		else if (cpara.cpolicy == cachepolicy::lac) {
+			all_laccachedlba = new vector<LAC*>;
+		}
 		else if (cpara.cpolicy == cachepolicy::lru || cpara.cpolicy == cachepolicy::cflru) {
 			all_cflrucachedlba = new vector<CFLRU*>;
 		}
+
+
 
 		for (uint64_t i = 0; i < cpara.cache_portion_size / cpara.ssd_page_size / cpara.set_associativity; i++) {
 			list<uint64_t>* l{ new list<uint64_t> };
@@ -377,6 +389,10 @@ namespace SSD_Components {
 			else if (cpara.cpolicy == cachepolicy::lru) {
 				CFLRU* lr{ new CFLRU{0} };
 				all_cflrucachedlba->push_back(lr);
+			}
+			else if (cpara.cpolicy == cachepolicy::lac) {
+				LAC* lr{ new LAC{0} };
+				all_laccachedlba->push_back(lr);
 			}
 			else if (cpara.cpolicy == cachepolicy::cflru) {
 				CFLRU* lr{ new CFLRU{cpara.set_associativity} };
@@ -529,8 +545,11 @@ namespace SSD_Components {
 					cout << oec << " " << *next_eviction_candidate << endl;
 				}*/
 			}
-			else if (cpara.cpolicy == cachepolicy::lru || cpara.cpolicy == cachepolicy::cflru) {
-				(*all_cflrucachedlba)[cache_index]->modify(lba, !rw);
+			else if (cpara.cpolicy == cachepolicy::lac ){
+				(*all_laccachedlba)[cache_index]->modify(lba, !rw);
+			}
+			else if (cpara.cpolicy == cachepolicy::lru || cpara.cpolicy == cachepolicy::lac) {
+				(*all_laccachedlba)[cache_index]->modify(lba, !rw);
 			}
 			else if (cpara.cpolicy == cachepolicy::cpu) {
 
@@ -667,6 +686,7 @@ namespace SSD_Components {
 		CFLRU* temp_cflrucachedlba{ NULL };
 		lfuHeap* temp_lfucachedlba{ NULL };
 		lrfuHeap* temp_lrfucachedlba{NULL};
+		LAC* temp_laccachedlba{ NULL };
 		cachepolicy cp{ cachepolicy::random };
 		uint64_t* next_cand{ NULL };
 
@@ -695,6 +715,9 @@ namespace SSD_Components {
 			}
 			else if (cpara.cpolicy == cachepolicy::lfu) {
 				temp_lfucachedlba = (*all_lfucachedlba)[cache_index];
+			}
+			else if (cpara.cpolicy == cachepolicy::lac) {
+				temp_laccachedlba = (*all_laccachedlba)[cache_index];
 			}
 			else if (cpara.cpolicy == cachepolicy::lru || cpara.cpolicy == cachepolicy::cflru) {
 				temp_cflrucachedlba = (*all_cflrucachedlba)[cache_index];
@@ -783,6 +806,11 @@ namespace SSD_Components {
 				evict_lba_base_addr = temp_lfucachedlba->top();
 				temp_lfucachedlba->pop();
 			}
+
+			else if (cp == cachepolicy::lac) {
+				evict_lba_base_addr = temp_laccachedlba->pop();
+			}
+
 			else if (cp == cachepolicy::lrfu) {
 				//TODO
 				evict_lba_base_addr = temp_lrfucachedlba->removeRoot();
@@ -877,6 +905,10 @@ namespace SSD_Components {
 			
 			
 
+		}
+		else if (cp == cachepolicy::lac ) {
+			temp_laccachedlba->add(lba);
+			if (!rw) temp_laccachedlba->modify(lba, 1);
 		}
 		else if (cp == cachepolicy::lru || cp == cachepolicy::cflru) {
 			temp_cflrucachedlba->add(lba);

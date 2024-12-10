@@ -12,6 +12,7 @@
 #include "OutputLog.h"
 #include "lrfu_heap.h"
 #include "CFLRU.h"
+#include "LAC.h"
 
 class lruTwoListClass {
 private:
@@ -90,6 +91,7 @@ namespace SSD_Components {
 		vector<list<uint64_t>*>* all_fifocachedlba{ NULL };
 		vector<CFLRU*>* all_cflrucachedlba{ NULL };
 		vector<lfuHeap*>* all_lfucachedlba{NULL};
+		vector<LAC*>* all_laccachedlba{ NULL };
 
 		lrfuHeap* lrfucachedlba{NULL}; //for lrfu
 		vector<lrfuHeap*>* all_lrfucachedlba{ NULL };

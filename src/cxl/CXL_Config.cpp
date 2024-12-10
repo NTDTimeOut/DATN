@@ -78,6 +78,9 @@ void cxl_config::readConfigFile() {
 			else if (policy == "CPU") {
 				cpolicy = cachepolicy::cpu;
 			}
+			else if (policy == "LAC") {
+				cpolicy = cachepolicy::lac;
+			}
 		}
 		else if (info == "Prefetch_cache_policy") {
 			string policy;

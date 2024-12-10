@@ -5,6 +5,6 @@ Mix_mode 1
 Cache_portion_percentage 100
 Has_mshr 1
 Cache_placement 16
-Cache_policy LAC
+Cache_policy LFRU
 Prefetcher Best-offset
 Total_number_of_requests 60714660
