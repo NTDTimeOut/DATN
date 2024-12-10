@@ -10,7 +10,7 @@
 				 <IOPS_Read>4381.000000</IOPS_Read>
 				 <IOPS_Write>2618.000000</IOPS_Write>
 				 <IOPS_Write_after_PRECOND>0.000000</IOPS_Write_after_PRECOND>
-				 <IOPS_Write_after_GC>-0.018651</IOPS_Write_after_GC>
+				 <IOPS_Write_after_GC>-0.018712</IOPS_Write_after_GC>
 				 <Bytes_Transferred>0.000000</Bytes_Transferred>
 				 <Bytes_Transferred_Read>0.000000</Bytes_Transferred_Read>
 				 <Bytes_Transferred_Write>0.000000</Bytes_Transferred_Write>
