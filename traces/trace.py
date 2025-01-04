@@ -14,7 +14,7 @@ def generate_trace(filename, num_requests=1000000):
             current_time += random.randint(100, 1000)
             
             # Type (1=read, 0=write)
-            req_type = random.randint(0, 1)
+            req_type = random.randint(0, 15)
             
             # LBA (địa chỉ logic, khoảng 100M-1B)
             lba = random.randint(100_000_000, 1_000_000_000)
