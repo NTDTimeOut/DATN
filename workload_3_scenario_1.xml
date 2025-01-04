@@ -6,23 +6,21 @@
 				 <Request_Count>200000</Request_Count>
 				 <Read_Request_Count>100114</Read_Request_Count>
 				 <Write_Request_Count>99886</Write_Request_Count>
-				 <IOPS>inf</IOPS>
-				 <IOPS_Read>inf</IOPS_Read>
-				 <IOPS_Write>inf</IOPS_Write>
-				 <IOPS_Write_after_PRECOND>0.000005</IOPS_Write_after_PRECOND>
-				 <IOPS_Write_after_GC>-0.770137</IOPS_Write_after_GC>
-				 <Bytes_Transferred>0.000000</Bytes_Transferred>
-				 <Bytes_Transferred_Read>0.000000</Bytes_Transferred_Read>
-				 <Bytes_Transferred_Write>0.000000</Bytes_Transferred_Write>
-				 <Bandwidth>-nan</Bandwidth>
-				 <Bandwidth_Read>-nan</Bandwidth_Read>
-				 <Bandwidth_Write>-nan</Bandwidth_Write>
-				 <Device_Response_Time>0</Device_Response_Time>
-				 <Min_Device_Response_Time>1271310319</Min_Device_Response_Time>
-				 <Max_Device_Response_Time>0</Max_Device_Response_Time>
-				 <End_to_End_Request_Delay>0</End_to_End_Request_Delay>
-				 <Min_End_to_End_Request_Delay>1271310319</Min_End_to_End_Request_Delay>
-				 <Max_End_to_End_Request_Delay>0</Max_End_to_End_Request_Delay>
+				 <IOPS>200000.000000</IOPS>
+				 <IOPS_Read>100114.000000</IOPS_Read>
+				 <IOPS_Write>99886.000000</IOPS_Write>
+				 <Bytes_Transferred>12870392832.000000</Bytes_Transferred>
+				 <Bytes_Transferred_Read>6437762048.000000</Bytes_Transferred_Read>
+				 <Bytes_Transferred_Write>6432630784.000000</Bytes_Transferred_Write>
+				 <Bandwidth>12870392832.000000</Bandwidth>
+				 <Bandwidth_Read>6437762048.000000</Bandwidth_Read>
+				 <Bandwidth_Write>6432630784.000000</Bandwidth_Write>
+				 <Device_Response_Time>47937</Device_Response_Time>
+				 <Min_Device_Response_Time>9</Min_Device_Response_Time>
+				 <Max_Device_Response_Time>62378</Max_Device_Response_Time>
+				 <End_to_End_Request_Delay>893728</End_to_End_Request_Delay>
+				 <Min_End_to_End_Request_Delay>9</Min_End_to_End_Request_Delay>
+				 <Max_End_to_End_Request_Delay>1683683</Max_End_to_End_Request_Delay>
 		</Host.IO_Flow>
 	</Host>
 	<SSDDevice>
@@ -41,7 +39,6 @@
 			</SSDDevice.IO_Stream>
 		</SSDDevice.HostInterface>
 		<SSDDevice.FTL Issued_Flash_Read_CMD="118567" Issued_Flash_Interleaved_Read_CMD="0" Issued_Flash_Multiplane_Read_CMD="28237" Issued_Flash_Copyback_Read_CMD="0" Issued_Flash_Multiplane_Copyback_Read_CMD="0" Issued_Flash_Program_CMD="19281" Issued_Flash_Interleaved_Program_CMD="0" Issued_Flash_Multiplane_Program_CMD="23449" Issued_Flash_Interleaved_Multiplane_Program_CMD="0" Issued_Flash_Copyback_Program_CMD="0" Issued_Flash_Multiplane_Copyback_Program_CMD="0" Issued_Flash_Erase_CMD="0" Issued_Flash_Interleaved_Erase_CMD="0" Issued_Flash_Multiplane_Erase_CMD="0" Issued_Flash_Interleaved_Multiplane_Erase_CMD="0" Issued_Flash_Suspend_Program_CMD="0" Issued_Flash_Suspend_Erase_CMD="0" Issued_Flash_Read_CMD_For_Mapping="0" Issued_Flash_Program_CMD_For_Mapping="0" CMT_Hits="273046" CMT_Hits_For_Read="185508" CMT_Hits_For_Write="87538" CMT_Misses="0" CMT_Misses_For_Read="0" CMT_Misses_For_Write="0" Total_CMT_Queries="273046" Total_CMT_Queries_For_Reads="185508" Total_CMT_Queries_For_Writes="87538" Total_GC_Executions="0" Average_Page_Movement_For_GC="-nan" Total_WL_Executions="0" Average_Page_Movement_For_WL="-nan"/>
-		<SSDDevice.GearUp Utilization="0.000000" Host_write="87538" Host_write_subpgs="87538" Physical_write="0" Physical_write_count_subpg="0" Relief_write="0" Relief_proportion="0.000000" Total_WAF="0.000000" Total_WAF_subpgs="0.000000" Additional_WAF_by_mapping="0" WAI WAF Max_consecutive_gc_write="0" Relief_type="18" Relief_ratio="-nan" Reliefed_Space Relief_Histogram>8192 Relief_freq="-nan" Relief_count="0" Erase_count="0"/>
 		<SSDDevice.TSU>
 			<SSDDevice.TSU.User_Read_TR_Queue Name="User_Read_TR_Queue@0@0" No_Of_Transactions_Enqueued="2880" No_Of_Transactions_Dequeued="2880" Avg_Queue_Length="0.822059" Max_Queue_Length="11" STDev_Queue_Length="2.625787" Avg_Transaction_Waiting_Time="31" Max_Transaction_Waiting_Time="104"/>
 			<SSDDevice.TSU.User_Read_TR_Queue Name="User_Read_TR_Queue@0@1" No_Of_Transactions_Enqueued="2928" No_Of_Transactions_Dequeued="2928" Avg_Queue_Length="0.875024" Max_Queue_Length="10" STDev_Queue_Length="2.653602" Avg_Transaction_Waiting_Time="32" Max_Transaction_Waiting_Time="103"/>
