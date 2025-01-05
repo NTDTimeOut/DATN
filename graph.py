@@ -71,8 +71,8 @@ def create_boxplot(ax, data, colors):
     """Tạo boxplot cho phân phối thời gian của Flash Chips"""
     # Chuẩn bị dữ liệu cho boxplot
     plot_data = [
-        data[0][1], data[1][1], data[2][1],  # Execution times
-        data[0][2], data[1][2], data[2][2]   # Idle times
+        data[0][1], data[1][1],  # Execution times
+        data[0][2], data[1][2],   # Idle times
     ]
     
     # Vẽ boxplot
@@ -96,7 +96,7 @@ def create_boxplot(ax, data, colors):
     
     return bp
 
-def plot_comparison(workload_1, workload_2, workload_3):
+def plot_comparison(workload_1, workload_2):
     """Tạo biểu đồ so sánh hiệu năng giữa các workload"""
     # Thiết lập cấu hình chung
     plt.rcParams.update({'font.size': 12})
@@ -105,7 +105,7 @@ def plot_comparison(workload_1, workload_2, workload_3):
     width = 0.25
     
     # Dữ liệu workload
-    workloads = [workload_1, workload_2, workload_3]
+    workloads = [workload_1, workload_2]
     
     # 1. Biểu đồ IOPS
     create_bar_plot(ax1, workloads, 
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     # Đọc dữ liệu từ các file XML
     workload_1 = parse_xml_file('workload_1_scenario_1.xml')
     workload_2 = parse_xml_file('workload_2_scenario_1.xml')
-    workload_3 = parse_xml_file('workload_3_scenario_1.xml')
+    # workload_3 = parse_xml_file('workload_3_scenario_1.xml')
     
     # Vẽ biểu đồ so sánh
-    plot_comparison(workload_1, workload_2, workload_3)
+    plot_comparison(workload_1, workload_2)
